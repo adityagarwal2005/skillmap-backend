@@ -16,3 +16,4 @@ requests==2.33.1
 six==1.17.0
 sqlparse==0.5.5
 urllib3==2.6.3
+dj-database-url==2.2.0
