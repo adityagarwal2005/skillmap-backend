@@ -132,7 +132,7 @@ CORS_ALLOWED_ORIGINS = [
     if origin.strip()
 ]
 
-CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = True  # temporary fix
 
 # JWT
 SIMPLE_JWT = {
