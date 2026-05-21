@@ -44,3 +44,16 @@ class StudentProfile(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.education_type}"
+    
+
+import random
+from django.utils import timezone
+
+class OTPVerification(models.Model):
+    email   = models.EmailField()
+    otp     = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_used = models.BooleanField(default=False)
+
+    def is_expired(self):
+        return (timezone.now() - self.created_at).seconds > 600  # 10 min expiry

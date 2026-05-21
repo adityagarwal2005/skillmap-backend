@@ -26,16 +26,15 @@ from work import views as work_views
 from portfolio import views as portfolio_views
 from notifications import views as notification_views
 from reviews import views as review_views
-
 from feed import views as feed_views
 from collab import views as collab_views
-
 
 urlpatterns = [
     path("admin/", admin.site.urls),
 
     # Auth
-    path("users/register/", csrf_exempt(user_views.register)),
+    path("users/send-otp/", csrf_exempt(user_views.send_otp)),
+    path("users/verify-register/", csrf_exempt(user_views.verify_otp_and_register)),
     path("users/login/", csrf_exempt(user_views.login)),
     path("users/token/refresh/", csrf_exempt(user_views.refresh_token)),
     path("users/status/update/", csrf_exempt(user_views.update_status)),
@@ -45,21 +44,6 @@ urlpatterns = [
     path("users/<int:user_id>/", csrf_exempt(user_views.get_user)),
     path("users/<int:user_id>/edit/", csrf_exempt(user_views.edit_user)),
     path("users/<int:user_id>/delete/", csrf_exempt(user_views.delete_user)),
-
-    # Collab
-    path("collab/", csrf_exempt(collab_views.show_collab_posts)),
-    path("collab/create/", csrf_exempt(collab_views.create_collab_post)),
-    path("collab/mine/", csrf_exempt(collab_views.show_my_collab_posts)),
-    path("collab/<int:post_id>/apply/", csrf_exempt(collab_views.apply_to_collab)),
-    path("collab/<int:post_id>/applicants/", csrf_exempt(collab_views.get_collab_applicants)),
-    path("collab/<int:post_id>/close/", csrf_exempt(collab_views.close_collab_post)),
-    path("collab/requests/<int:request_id>/respond/", csrf_exempt(collab_views.respond_to_collab_request)),
-
-
-    # Feed
-    path("feed/", csrf_exempt(feed_views.smart_feed)),
-    path("feed/search/", csrf_exempt(feed_views.search_feed)),
-    path("feed/trending/", csrf_exempt(feed_views.trending_feed)),
 
     # Student Profile
     path("users/<int:user_id>/student-profile/", csrf_exempt(user_views.get_student_profile)),
@@ -93,6 +77,11 @@ urlpatterns = [
     path("portfolio/comments/<int:comment_id>/edit/", csrf_exempt(portfolio_views.edit_comment)),
     path("portfolio/comments/<int:comment_id>/remove/", csrf_exempt(portfolio_views.remove_comment)),
 
+    # Feed
+    path("feed/", csrf_exempt(feed_views.smart_feed)),
+    path("feed/search/", csrf_exempt(feed_views.search_feed)),
+    path("feed/trending/", csrf_exempt(feed_views.trending_feed)),
+
     # Work Requests
     path("work/requests/create/", csrf_exempt(work_views.create_work_request)),
     path("work/requests/user/<int:user_id>/", csrf_exempt(work_views.get_my_work_requests)),
@@ -121,5 +110,14 @@ urlpatterns = [
     # Reviews
     path("reviews/user/<int:reviewee_id>/add/", csrf_exempt(review_views.add_review)),
     path("reviews/user/<int:user_id>/", csrf_exempt(review_views.get_user_reviews)),
+
+    # Collab
+    path("collab/", csrf_exempt(collab_views.show_collab_posts)),
+    path("collab/create/", csrf_exempt(collab_views.create_collab_post)),
+    path("collab/mine/", csrf_exempt(collab_views.show_my_collab_posts)),
+    path("collab/<int:post_id>/apply/", csrf_exempt(collab_views.apply_to_collab)),
+    path("collab/<int:post_id>/applicants/", csrf_exempt(collab_views.get_collab_applicants)),
+    path("collab/<int:post_id>/close/", csrf_exempt(collab_views.close_collab_post)),
+    path("collab/requests/<int:request_id>/respond/", csrf_exempt(collab_views.respond_to_collab_request)),
 
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
