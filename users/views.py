@@ -464,16 +464,24 @@ def get_student_profile(request, user_id):
 
 
 def test_email(request):
-    from django.core.mail import send_mail
+    import threading
     import os
-    try:
-        send_mail(
-            subject='SkillMap Test Email',
-            message='This is a test email from SkillMap',
-            from_email=None,
-            recipient_list=[os.environ.get('EMAIL_HOST_USER')],
-            fail_silently=False,
-        )
-        return JsonResponse({'message': 'Email sent successfully'})
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
+
+    def _send():
+        from django.core.mail import send_mail
+        try:
+            send_mail(
+                subject='SkillMap Test',
+                message='Test email',
+                from_email=None,
+                recipient_list=[os.environ.get('EMAIL_HOST_USER')],
+                fail_silently=False,
+            )
+        except Exception as e:
+            print(f"Email error: {e}")
+
+    thread = threading.Thread(target=_send)
+    thread.daemon = True
+    thread.start()
+
+    return JsonResponse({'message': 'Email sending in background - check inbox in 30 seconds'})
