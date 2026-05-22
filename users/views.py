@@ -55,18 +55,21 @@ from django.core.mail import send_mail
 def send_otp_email(username, email, otp):
     import os
     from django.core.mail import send_mail
+    print(f"=== ATTEMPTING EMAIL TO: {email} ===")
+    print(f"=== FROM: {os.environ.get('EMAIL_HOST_USER')} ===")
+    print(f"=== OTP: {otp} ===")
     try:
-        send_mail(
+        result = send_mail(
             subject='Your SkillMap verification code',
             message=f'Hi {username},\n\nYour SkillMap verification code is:\n\n{otp}\n\nThis code expires in 10 minutes.\n\n— SkillMap Team',
             from_email=os.environ.get('EMAIL_HOST_USER'),
             recipient_list=[email],
             fail_silently=False,
         )
-        print(f"OTP email sent to {email}")
+        print(f"=== EMAIL RESULT: {result} ===")
     except Exception as e:
-        print(f"OTP email error: {e}")
-
+        print(f"=== EMAIL ERROR: {e} ===")
+        
 def send_otp(request):
     if request.method == 'POST':
         email    = request.POST.get('email')
