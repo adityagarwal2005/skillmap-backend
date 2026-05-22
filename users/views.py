@@ -49,6 +49,29 @@ def get_user_from_token(request):
         return None, JsonResponse({"error": "Invalid or expired token"}, status=401)
 
 
+import threading
+from django.core.mail import send_mail
+
+def send_otp_email(username, email, otp):
+    try:
+        send_mail(
+            subject='Your SkillMap verification code',
+            message=f'''Hi {username},
+
+Your SkillMap verification code is:
+
+{otp}
+
+This code expires in 10 minutes.
+
+— SkillMap Team''',
+            from_email=None,
+            recipient_list=[email],
+            fail_silently=True,
+        )
+    except Exception:
+        pass
+
 def send_otp(request):
     if request.method == 'POST':
         email    = request.POST.get('email')
@@ -65,24 +88,13 @@ def send_otp(request):
         OTPVerification.objects.filter(email=email).delete()
         OTPVerification.objects.create(email=email, otp=otp)
 
-        try:
-            send_mail(
-                subject='Your SkillMap verification code',
-                message=f'''Hi {username},
-
-Your SkillMap verification code is:
-
-{otp}
-
-This code expires in 10 minutes.
-
-— SkillMap Team''',
-                from_email=None,
-                recipient_list=[email],
-                fail_silently=False,
-            )
-        except Exception as e:
-            return JsonResponse({'error': 'Failed to send email. Please try again.'}, status=500)
+        # Send email in background thread so it doesn't block
+        thread = threading.Thread(
+            target=send_otp_email,
+            args=(username, email, otp)
+        )
+        thread.daemon = True
+        thread.start()
 
         return JsonResponse({'message': 'OTP sent to your email'})
 
