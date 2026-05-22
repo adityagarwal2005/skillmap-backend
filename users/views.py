@@ -53,24 +53,19 @@ import threading
 from django.core.mail import send_mail
 
 def send_otp_email(username, email, otp):
+    import os
+    from django.core.mail import send_mail
     try:
         send_mail(
             subject='Your SkillMap verification code',
-            message=f'''Hi {username},
-
-Your SkillMap verification code is:
-
-{otp}
-
-This code expires in 10 minutes.
-
-— SkillMap Team''',
-            from_email=None,
+            message=f'Hi {username},\n\nYour SkillMap verification code is:\n\n{otp}\n\nThis code expires in 10 minutes.\n\n— SkillMap Team',
+            from_email=os.environ.get('EMAIL_HOST_USER'),
             recipient_list=[email],
-            fail_silently=True,
+            fail_silently=False,
         )
-    except Exception:
-        pass
+        print(f"OTP email sent to {email}")
+    except Exception as e:
+        print(f"OTP email error: {e}")
 
 def send_otp(request):
     if request.method == 'POST':
