@@ -120,4 +120,8 @@ urlpatterns = [
     path("collab/<int:post_id>/close/", csrf_exempt(collab_views.close_collab_post)),
     path("collab/requests/<int:request_id>/respond/", csrf_exempt(collab_views.respond_to_collab_request)),
 
+
+    #temp
+    path('test-email/', csrf_exempt(user_views.test_email)),
+
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

@@ -461,3 +461,19 @@ def get_student_profile(request, user_id):
 
     return JsonResponse({"error": "Method not allowed"}, status=405)
 
+
+
+def test_email(request):
+    from django.core.mail import send_mail
+    import os
+    try:
+        send_mail(
+            subject='SkillMap Test Email',
+            message='This is a test email from SkillMap',
+            from_email=None,
+            recipient_list=[os.environ.get('EMAIL_HOST_USER')],
+            fail_silently=False,
+        )
+        return JsonResponse({'message': 'Email sent successfully'})
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
