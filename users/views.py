@@ -9,6 +9,8 @@ from django.core.mail import send_mail
 from .models import OTPVerification
 import random
 
+from django.core.mail import send_mail
+from smtplib import SMTPException
 
 def get_distance_km(lat1, lon1, lat2, lon2):
     R = 6371
@@ -47,12 +49,9 @@ def get_user_from_token(request):
         return None, JsonResponse({"error": "Invalid or expired token"}, status=401)
 
 
-
-
 def send_otp(request):
-    """Step 1 — send OTP to email"""
     if request.method == 'POST':
-        email = request.POST.get('email')
+        email    = request.POST.get('email')
         username = request.POST.get('username')
 
         if User.objects.filter(username=username).exists():
@@ -61,17 +60,15 @@ def send_otp(request):
         if User.objects.filter(email=email).exists():
             return JsonResponse({'error': 'Email already registered. Please login.'}, status=400)
 
-        # Generate OTP
         otp = str(random.randint(100000, 999999))
 
-        # Save OTP
-        OTPVerification.objects.filter(email=email).delete()  # remove old OTPs
+        OTPVerification.objects.filter(email=email).delete()
         OTPVerification.objects.create(email=email, otp=otp)
 
-        # Send email
-        send_mail(
-            subject='Your SkillMap verification code',
-            message=f'''Hi {username},
+        try:
+            send_mail(
+                subject='Your SkillMap verification code',
+                message=f'''Hi {username},
 
 Your SkillMap verification code is:
 
@@ -79,16 +76,17 @@ Your SkillMap verification code is:
 
 This code expires in 10 minutes.
 
-If you didn't request this, ignore this email.
-
 — SkillMap Team''',
-            from_email=None,
-            recipient_list=[email],
-            fail_silently=False,
-        )
+                from_email=None,
+                recipient_list=[email],
+                fail_silently=False,
+            )
+        except Exception as e:
+            return JsonResponse({'error': 'Failed to send email. Please try again.'}, status=500)
 
         return JsonResponse({'message': 'OTP sent to your email'})
 
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 def verify_otp_and_register(request):
     """Step 2 — verify OTP and create account"""
@@ -450,3 +448,4 @@ def get_student_profile(request, user_id):
             return JsonResponse({"error": "Student profile not found"}, status=404)
 
     return JsonResponse({"error": "Method not allowed"}, status=405)
+
