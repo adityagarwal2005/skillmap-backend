@@ -81,38 +81,53 @@ def get_my_work_requests(request, user_id):
 
 
 def get_available_work_requests(request, user_id):
-    if request.method == "GET":
-        try:
-            user = User.objects.get(id=user_id)
-            user_skills = user.skills.all()
+    user = get_user_from_token(request)
+    if not user:
+        return JsonResponse({'error': 'Unauthorized'}, status=401)
 
-            if not user_skills:
-                return JsonResponse({"error": "Add skills to your profile to see matching requests"}, status=400)
+    # Get filter params
+    skill_filter = request.GET.get('skill', '').strip().lower()
+    radius_km    = float(request.GET.get('radius', 50))
+    latitude     = request.GET.get('latitude')
+    longitude    = request.GET.get('longitude')
 
-            work_requests = WorkRequest.objects.filter(
-                status='open',
-                required_skills__in=user_skills,
-                expires_at__gt=timezone.now(),
-            ).exclude(created_by=user).distinct().order_by("-created_at")
+    # Get all open work requests
+    work_requests = WorkRequest.objects.filter(status='open')
 
-            data = [
-                {
-                    "id": wr.id,
-                    "created_by": wr.created_by.username,
-                    "description": wr.description,
-                    "skills": [s.name for s in wr.required_skills.all()],
-                    "payment_amount": wr.payment_amount,
-                    "time_limit_hours": wr.time_limit_hours,
-                    "expires_at": wr.expires_at,
-                    "created_at": wr.created_at,
-                }
-                for wr in work_requests
-            ]
-            return JsonResponse({"work_requests": data, "count": len(data)})
-        except User.DoesNotExist:
-            return JsonResponse({"error": "User not found"}, status=404)
+    results = []
+    for wr in work_requests:
+        # Skip own requests
+        if wr.created_by.id == user.id:
+            continue
 
-    return JsonResponse({"error": "Method not allowed"}, status=405)
+        # Skill filter
+        if skill_filter:
+            skills = [s.name.lower() for s in wr.required_skills.all()]
+            if not any(skill_filter in s for s in skills):
+                continue
+
+        # Location filter
+        if latitude and longitude and wr.created_by.latitude and wr.created_by.longitude:
+            distance = get_distance_km(
+                float(latitude), float(longitude),
+                wr.created_by.latitude, wr.created_by.longitude
+            )
+            if distance > radius_km:
+                continue
+
+        results.append({
+            'id':               wr.id,
+            'description':      wr.description,
+            'payment_amount':   wr.payment_amount,
+            'time_limit_hours': wr.time_limit_hours,
+            'status':           wr.status,
+            'created_by':       wr.created_by.username,
+            'skills':           [s.name for s in wr.required_skills.all()],
+            'expires_at':       str(wr.expires_at) if wr.expires_at else None,
+            'responses_count':  wr.responses.count() if hasattr(wr, 'responses') else 0,
+        })
+
+    return JsonResponse({'work_requests': results})
 
 
 def respond_to_work_request(request, work_request_id):

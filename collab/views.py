@@ -65,73 +65,48 @@ def create_collab_post(request):
 
 
 def show_collab_posts(request):
-    if request.method == "GET":
-        skills_filter = request.GET.get("skills", "").strip()
-        collab_type = request.GET.get("type", "").strip()
-        radius_km = request.GET.get("radius", "").strip()
-        latitude = request.GET.get("latitude", "").strip()
-        longitude = request.GET.get("longitude", "").strip()
+    # Get filter params
+    skill_filter = request.GET.get('skill', '').strip().lower()
+    collab_type  = request.GET.get('type', '').strip()
+    radius_km    = float(request.GET.get('radius', 50))
+    latitude     = request.GET.get('latitude')
+    longitude    = request.GET.get('longitude')
 
-        posts = CollabPost.objects.filter(
-            status='open'
-        ).select_related("user").prefetch_related("skills_needed").order_by("-created_at")
+    posts = CollabPost.objects.filter(status='open')
 
-        if collab_type:
-            posts = posts.filter(collab_type=collab_type)
+    results = []
+    for post in posts:
+        # Type filter
+        if collab_type and post.collab_type != collab_type:
+            continue
 
-        if skills_filter:
-            skill_list = [s.strip() for s in skills_filter.split(",")]
-            for skill_name in skill_list:
-                posts = posts.filter(skills_needed__name__iexact=skill_name)
-            posts = posts.distinct()
+        # Skill filter
+        if skill_filter:
+            skills = [s.name.lower() for s in post.skills_needed.all()]
+            if not any(skill_filter in s for s in skills):
+                continue
 
-        # radius filter
-        if radius_km and latitude and longitude:
-            import math
-            def get_distance_km(lat1, lon1, lat2, lon2):
-                R = 6371
-                d_lat = math.radians(lat2 - lat1)
-                d_lon = math.radians(lon2 - lon1)
-                a = (math.sin(d_lat / 2) ** 2 +
-                     math.cos(math.radians(lat1)) *
-                     math.cos(math.radians(lat2)) *
-                     math.sin(d_lon / 2) ** 2)
-                return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        # Location filter
+        if latitude and longitude and post.latitude and post.longitude:
+            distance = get_distance_km(
+                float(latitude), float(longitude),
+                post.latitude, post.longitude
+            )
+            if distance > radius_km:
+                continue
 
-            try:
-                lat = float(latitude)
-                lon = float(longitude)
-                radius = float(radius_km)
-                filtered = []
-                for post in posts:
-                    post_lat = post.latitude or (post.user.latitude if post.user.latitude else None)
-                    post_lon = post.longitude or (post.user.longitude if post.user.longitude else None)
-                    if post_lat and post_lon:
-                        distance = get_distance_km(lat, lon, post_lat, post_lon)
-                        if distance <= radius:
-                            filtered.append(post)
-                posts = filtered
-            except ValueError:
-                return JsonResponse({"error": "Invalid location values"}, status=400)
+        results.append({
+            'id':           post.id,
+            'title':        post.title,
+            'description':  post.description,
+            'collab_type':  post.collab_type,
+            'status':       post.status,
+            'posted_by':    post.user.username,
+            'skills_needed':[s.name for s in post.skills_needed.all()],
+            'applicants':   post.requests.count() if hasattr(post, 'requests') else 0,
+        })
 
-        data = [
-            {
-                "id": p.id,
-                "posted_by": p.user.username,
-                "title": p.title,
-                "description": p.description,
-                "collab_type": p.collab_type,
-                "skills_needed": [s.name for s in p.skills_needed.all()],
-                "latitude": p.latitude,
-                "longitude": p.longitude,
-                "applicants": p.requests.count(),
-                "created_at": p.created_at,
-            }
-            for p in posts
-        ]
-        return JsonResponse({"collab_posts": data, "count": len(data)})
-
-    return JsonResponse({"error": "Method not allowed"}, status=405)
+    return JsonResponse({'collab_posts': results})
 
 def show_my_collab_posts(request):
     """Show all collab posts created by logged in user"""
