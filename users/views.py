@@ -53,23 +53,20 @@ import threading
 from django.core.mail import send_mail
 
 def send_otp_email(username, email, otp):
+    import resend
     import os
-    from django.core.mail import send_mail
-    print(f"=== ATTEMPTING EMAIL TO: {email} ===")
-    print(f"=== FROM: {os.environ.get('EMAIL_HOST_USER')} ===")
-    print(f"=== OTP: {otp} ===")
+    resend.api_key = os.environ.get('RESEND_API_KEY')
     try:
-        result = send_mail(
-            subject='Your SkillMap verification code',
-            message=f'Hi {username},\n\nYour SkillMap verification code is:\n\n{otp}\n\nThis code expires in 10 minutes.\n\n— SkillMap Team',
-            from_email=os.environ.get('EMAIL_HOST_USER'),
-            recipient_list=[email],
-            fail_silently=False,
-        )
-        print(f"=== EMAIL RESULT: {result} ===")
+        resend.Emails.send({
+            "from": "SkillMap <onboarding@resend.dev>",
+            "to": [email],
+            "subject": "Your SkillMap verification code",
+            "text": f"Hi {username},\n\nYour SkillMap verification code is:\n\n{otp}\n\nThis code expires in 10 minutes.\n\n— SkillMap Team"
+        })
+        print(f"=== RESEND EMAIL SENT TO {email} ===")
     except Exception as e:
-        print(f"=== EMAIL ERROR: {e} ===")
-        
+        print(f"=== RESEND ERROR: {e} ===")
+
 def send_otp(request):
     if request.method == 'POST':
         email    = request.POST.get('email')
