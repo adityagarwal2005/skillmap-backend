@@ -88,48 +88,73 @@ def apply_radius_filter(items, lat, lon, radius):
 
 
 def smart_feed(request):
-    if request.method == "GET":
-        user, error = get_user_from_token(request)
-        if error:
-            return error
+    user = get_user_from_token(request)
+    if not user:
+        return JsonResponse({'error': 'Unauthorized'}, status=401)
 
-        radius_km = request.GET.get("radius", "").strip()
-        latitude = request.GET.get("latitude", "").strip()
-        longitude = request.GET.get("longitude", "").strip()
+    # Get user skills
+    user_skills = [s.name.lower() for s in user.skills.all()]
+    user_category = user.category
 
-        user_skills = user.skills.all()
-        user_category = user.category
+    items = PortfolioItem.objects.all().order_by('-created_at')
 
-        items = PortfolioItem.objects.select_related(
-            "user", "user__category"
-        ).prefetch_related(
-            "skills", "tags", "media", "reactions", "comments"
-        ).order_by("-created_at")
+    results = []
+    for item in items:
+        item_skills = [s.name.lower() for s in item.skills.all()]
 
-        if user_skills.exists():
-            items = items.filter(
-                Q(skills__in=user_skills) |
-                Q(user__category=user_category)
-            ).distinct()
-        elif user_category:
-            items = items.filter(user__category=user_category).distinct()
+        # Calculate relevance score
+        score = 0
 
-        if radius_km and latitude and longitude:
-            try:
-                items = apply_radius_filter(
-                    list(items),
-                    float(latitude),
-                    float(longitude),
-                    float(radius_km)
-                )
-            except ValueError:
-                return JsonResponse({"error": "Invalid location values"}, status=400)
+        # Category match
+        if user_category and item.user.category == user_category:
+            score += 3
 
-        data = [format_item(i, request) for i in items]
-        return JsonResponse({"feed": data, "count": len(data)})
+        # Skill match
+        for skill in user_skills:
+            if skill in item_skills:
+                score += 2
 
-    return JsonResponse({"error": "Method not allowed"}, status=405)
+        # If no skills/category — show everything (new user)
+        if not user_skills and not user_category:
+            score = 1
 
+        # Always include verified items
+        if item.verified:
+            score += 1
+
+        results.append({
+            'score': score,
+            'item': item
+        })
+
+    # Sort by score then by date
+    results.sort(key=lambda x: (x['score'], x['item'].created_at.timestamp()), reverse=True)
+
+    feed = []
+    for r in results:
+        item = r['item']
+        reactions = Reaction.objects.filter(portfolio_item=item).count()
+        comments  = Comment.objects.filter(portfolio_item=item).count()
+        feed.append({
+            'id':             item.id,
+            'title':          item.title,
+            'description':    item.description,
+            'portfolio_type': item.portfolio_type,
+            'verified':       item.verified,
+            'created_at':     str(item.created_at),
+            'user': {
+                'id':       item.user.id,
+                'username': item.user.username,
+                'category': item.user.category.name if item.user.category else None,
+            },
+            'skills':    [s.name for s in item.skills.all()],
+            'tags':      [t.name for t in item.tags.all()],
+            'media':     [{'id': m.id, 'url': m.url or (request.build_absolute_uri(m.file.url) if m.file else None), 'media_type': m.media_type} for m in item.media.all()],
+            'reactions': reactions,
+            'comments':  comments,
+        })
+
+    return JsonResponse({'feed': feed})
 
 def search_feed(request):
     if request.method == "GET":
