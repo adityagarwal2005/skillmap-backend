@@ -480,3 +480,6 @@ def test_email(request):
     thread.start()
 
     return JsonResponse({'message': 'Email sending in background - check inbox in 30 seconds'})
+
+def health(request):
+    return JsonResponse({'status': 'ok'})

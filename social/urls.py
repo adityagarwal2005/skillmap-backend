@@ -124,4 +124,6 @@ urlpatterns = [
     #temp
     path('test-email/', csrf_exempt(user_views.test_email)),
 
+   #cron-job , health
+   path('health/', user_views.health),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
