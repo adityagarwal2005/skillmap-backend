@@ -126,4 +126,7 @@ urlpatterns = [
 
    #cron-job , health
    path('health/', user_views.health),
+
+   #temporary registration
+   path('users/register/', csrf_exempt(user_views.register)),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

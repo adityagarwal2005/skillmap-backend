@@ -483,3 +483,31 @@ def test_email(request):
 
 def health(request):
     return JsonResponse({'status': 'ok'})
+
+
+def register(request):
+    if request.method == 'POST':
+        username = request.POST.get('username')
+        email    = request.POST.get('email')
+        password = request.POST.get('password')
+
+        if User.objects.filter(username=username).exists():
+            return JsonResponse({'error': 'Username already taken'}, status=400)
+
+        if User.objects.filter(email=email).exists():
+            return JsonResponse({'error': 'Email already registered. Please login.'}, status=400)
+
+        user = User.objects.create(
+            username=username,
+            email=email,
+            password=make_password(password),
+        )
+
+        tokens = get_tokens_for_user(user)
+        return JsonResponse({
+            'message': f'Welcome to SkillMap, {username}!',
+            'user_id': user.id,
+            'username': user.username,
+            'access': tokens['access'],
+            'refresh': tokens['refresh'],
+        }, status=201)
