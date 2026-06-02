@@ -88,11 +88,15 @@ def apply_radius_filter(items, lat, lon, radius):
 
 
 def smart_feed(request):
-    user = get_user_from_token(request)
+    result = get_user_from_token(request)
+    if isinstance(result, tuple):
+        user = result[0]
+    else:
+        user = result
+
     if not user:
         return JsonResponse({'error': 'Unauthorized'}, status=401)
 
-    # Get user skills
     user_skills = [s.name.lower() for s in user.skills.all()]
     user_category = user.category
 
@@ -101,33 +105,23 @@ def smart_feed(request):
     results = []
     for item in items:
         item_skills = [s.name.lower() for s in item.skills.all()]
-
-        # Calculate relevance score
         score = 0
 
-        # Category match
         if user_category and item.user.category == user_category:
             score += 3
 
-        # Skill match
         for skill in user_skills:
             if skill in item_skills:
                 score += 2
 
-        # If no skills/category — show everything (new user)
         if not user_skills and not user_category:
             score = 1
 
-        # Always include verified items
         if item.verified:
             score += 1
 
-        results.append({
-            'score': score,
-            'item': item
-        })
+        results.append({'score': score, 'item': item})
 
-    # Sort by score then by date
     results.sort(key=lambda x: (x['score'], x['item'].created_at.timestamp()), reverse=True)
 
     feed = []
@@ -155,77 +149,6 @@ def smart_feed(request):
         })
 
     return JsonResponse({'feed': feed})
-
-def search_feed(request):
-    if request.method == "GET":
-        q = request.GET.get("q", "").strip()
-        tags = request.GET.get("tags", "").strip()
-        radius_km = request.GET.get("radius", "").strip()
-        latitude = request.GET.get("latitude", "").strip()
-        longitude = request.GET.get("longitude", "").strip()
-        portfolio_type = request.GET.get("type", "").strip()
-
-        items = PortfolioItem.objects.select_related(
-            "user", "user__category"
-        ).prefetch_related(
-            "skills", "tags", "media", "reactions", "comments"
-        ).order_by("-created_at")
-
-        # text search with stop word filtering
-        search_words = []
-        if q:
-            search_words = [w for w in q.lower().split() if w not in STOP_WORDS]
-
-            if not search_words:
-                return JsonResponse({
-                    "error": "Please enter more specific search terms"
-                }, status=400)
-
-            query = Q()
-            for word in search_words:
-                query |= (
-                    Q(title__icontains=word) |
-                    Q(description__icontains=word) |
-                    Q(tags__name__icontains=word) |
-                    Q(skills__name__icontains=word)
-                )
-            items = items.filter(query).distinct()
-
-        # tag filter
-        if tags:
-            tag_list = [t.strip() for t in tags.split(",")]
-            for tag_name in tag_list:
-                items = items.filter(
-                    Q(tags__name__iexact=tag_name) |
-                    Q(skills__name__iexact=tag_name)
-                ).distinct()
-
-        # portfolio type filter
-        if portfolio_type:
-            items = items.filter(portfolio_type=portfolio_type)
-
-        # radius filter
-        if radius_km and latitude and longitude:
-            try:
-                items = apply_radius_filter(
-                    list(items),
-                    float(latitude),
-                    float(longitude),
-                    float(radius_km)
-                )
-            except ValueError:
-                return JsonResponse({"error": "Invalid location values"}, status=400)
-
-        # sort by relevance if text search was used
-        if search_words:
-            items = list(items)
-            items.sort(key=lambda x: relevance_score(x, search_words), reverse=True)
-
-        data = [format_item(i, request) for i in items]
-        return JsonResponse({"results": data, "count": len(data)})
-
-    return JsonResponse({"error": "Method not allowed"}, status=405)
-
 
 def trending_feed(request):
     if request.method == "GET":
