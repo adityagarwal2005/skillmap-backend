@@ -1,10 +1,10 @@
 from django.http import JsonResponse
 from django.db.models import Q
-from portfolio.models import PortfolioItem
 from users.models import User
 from skills.models import Skill, Tag
 from users.views import get_user_from_token
 import math
+from portfolio.models import PortfolioItem, Reaction, Comment
 
 
 STOP_WORDS = {
@@ -149,7 +149,66 @@ def smart_feed(request):
         })
 
     return JsonResponse({'feed': feed})
+def search_feed(request):
+    if request.method == "GET":
+        q = request.GET.get("q", "").strip()
+        tags = request.GET.get("tags", "").strip()
+        radius_km = request.GET.get("radius", "").strip()
+        latitude = request.GET.get("latitude", "").strip()
+        longitude = request.GET.get("longitude", "").strip()
+        portfolio_type = request.GET.get("type", "").strip()
 
+        items = PortfolioItem.objects.select_related(
+            "user", "user__category"
+        ).prefetch_related(
+            "skills", "tags", "media", "reactions", "comments"
+        ).order_by("-created_at")
+
+        search_words = []
+        if q:
+            search_words = [w for w in q.lower().split() if w not in STOP_WORDS]
+            if not search_words:
+                return JsonResponse({"error": "Please enter more specific search terms"}, status=400)
+            query = Q()
+            for word in search_words:
+                query |= (
+                    Q(title__icontains=word) |
+                    Q(description__icontains=word) |
+                    Q(tags__name__icontains=word) |
+                    Q(skills__name__icontains=word)
+                )
+            items = items.filter(query).distinct()
+
+        if tags:
+            tag_list = [t.strip() for t in tags.split(",")]
+            for tag_name in tag_list:
+                items = items.filter(
+                    Q(tags__name__iexact=tag_name) |
+                    Q(skills__name__iexact=tag_name)
+                ).distinct()
+
+        if portfolio_type:
+            items = items.filter(portfolio_type=portfolio_type)
+
+        if radius_km and latitude and longitude:
+            try:
+                items = apply_radius_filter(
+                    list(items),
+                    float(latitude),
+                    float(longitude),
+                    float(radius_km)
+                )
+            except ValueError:
+                return JsonResponse({"error": "Invalid location values"}, status=400)
+
+        if search_words:
+            items = list(items)
+            items.sort(key=lambda x: relevance_score(x, search_words), reverse=True)
+
+        data = [format_item(i, request) for i in items]
+        return JsonResponse({"results": data, "count": len(data)})
+
+    return JsonResponse({"error": "Method not allowed"}, status=405)
 def trending_feed(request):
     if request.method == "GET":
         user, error = get_user_from_token(request)
