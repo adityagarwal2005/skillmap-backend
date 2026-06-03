@@ -142,32 +142,36 @@ def verify_otp_and_register(request):
 
 def login(request):
     if request.method == 'POST':
-        username = request.POST.get('username')
-        password = request.POST.get('password')
+        identifier = request.POST.get('username') or request.POST.get('identifier')
+        password   = request.POST.get('password')
 
-        # Check if user exists first
+        # Try username first, then email
+        user = None
         try:
-            user = User.objects.get(username=username)
+            user = User.objects.get(username=identifier)
         except User.DoesNotExist:
-            return JsonResponse({
-                'error': 'No account found with this username. Please register first.'
-            }, status=404)
+            try:
+                user = User.objects.get(email=identifier)
+            except User.DoesNotExist:
+                return JsonResponse({
+                    'error': 'No account found with this username or email.'
+                }, status=404)
 
-        # User exists, check password
         if not check_password(password, user.password):
             return JsonResponse({
                 'error': 'Incorrect password. Please try again.'
             }, status=401)
 
-        # All good - generate token
         tokens = get_tokens_for_user(user)
         return JsonResponse({
             'message': f'Welcome, {user.username}!',
             'user_id': user.id,
             'username': user.username,
-            'access': tokens['access'],
+            'access':  tokens['access'],
             'refresh': tokens['refresh'],
         })
+
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 def refresh_token(request):
     if request.method == "POST":
@@ -289,76 +293,53 @@ def update_status(request):
 
 
 def search_users(request):
-    if request.method == "GET":
-        category_id = request.GET.get("category_id", "").strip()
-        skills = request.GET.get("skills", "").strip()
-        radius_km = request.GET.get("radius", "10").strip()
-        latitude = request.GET.get("latitude", "").strip()
-        longitude = request.GET.get("longitude", "").strip()
+    if request.method == 'GET':
+        category_id = request.GET.get('category_id')
+        latitude    = request.GET.get('latitude')
+        longitude   = request.GET.get('longitude')
+        radius_km   = float(request.GET.get('radius', 50))
+        skills      = request.GET.get('skills', '').strip()
 
         if not category_id:
-            return JsonResponse({"error": "category_id is required"}, status=400)
+            return JsonResponse({'error': 'Category is required'}, status=400)
 
-        if not latitude or not longitude:
-            return JsonResponse({"error": "latitude and longitude are required"}, status=400)
+        users = User.objects.filter(category_id=category_id)
 
-        try:
-            category = Category.objects.get(id=category_id)
-        except Category.DoesNotExist:
-            return JsonResponse({"error": "Category not found"}, status=404)
-
-        try:
-            lat = float(latitude)
-            lon = float(longitude)
-            radius = float(radius_km)
-        except ValueError:
-            return JsonResponse({"error": "Invalid location or radius values"}, status=400)
-
-        skill_list = []
+        # skill filter
         if skills:
-            skill_list = [s.strip() for s in skills.split(",")]
-            invalid_skills = []
-            for skill_name in skill_list:
-                if not Skill.objects.filter(name__iexact=skill_name).exists():
-                    invalid_skills.append(skill_name)
-            if invalid_skills:
-                return JsonResponse({
-                    "error": f"Invalid skill tags: {', '.join(invalid_skills)}. Use valid tags only."
-                }, status=400)
-
-        users = User.objects.filter(
-            category=category
-        ).select_related("category").prefetch_related("skills")
-
-        if skill_list:
-            users = users.filter(skills__name__in=skill_list).distinct()
+            skill_list = [s.strip().lower() for s in skills.split(',')]
+            for skill in skill_list:
+                users = users.filter(skills__name__icontains=skill)
 
         results = []
-        for user in users:
-            if user.latitude is None or user.longitude is None:
-                continue
-            distance = get_distance_km(lat, lon, user.latitude, user.longitude)
-            if distance <= radius:
-                results.append((user, round(distance, 2)))
+        for u in users:
+            # location filter — only apply if both user and searcher have location
+            if latitude and longitude and u.latitude and u.longitude:
+                distance = get_distance_km(
+                    float(latitude), float(longitude),
+                    u.latitude, u.longitude
+                )
+                if distance > radius_km:
+                    continue
+                dist_display = round(distance, 1)
+            else:
+                dist_display = None
 
-        results.sort(key=lambda x: x[1])
+            results.append({
+                'id':       u.id,
+                'username': u.username,
+                'category': u.category.name if u.category else None,
+                'skills':   [s.name for s in u.skills.all()],
+                'rating':   u.rating,
+                'status':   u.status,
+                'distance_km': dist_display,
+                'latitude': u.latitude,
+                'longitude': u.longitude,
+            })
 
-        data = [
-            {
-                "id": user.id,
-                "username": user.username,
-                "category": user.category.name if user.category else None,
-                "skills": [s.name for s in user.skills.all()],
-                "rating": user.rating,
-                "status": user.status,
-                "distance_km": distance,
-            }
-            for user, distance in results
-        ]
+        return JsonResponse({'results': results})
 
-        return JsonResponse({"category": category.name, "results": data, "count": len(data)})
-
-    return JsonResponse({"error": "Method not allowed"}, status=405)
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 
 def add_student_profile(request, user_id):
@@ -487,20 +468,24 @@ def health(request):
 
 def register(request):
     if request.method == 'POST':
-        username = request.POST.get('username')
-        email    = request.POST.get('email')
-        password = request.POST.get('password')
+        username  = request.POST.get('username')
+        email     = request.POST.get('email')
+        password  = request.POST.get('password')
+        latitude  = request.POST.get('latitude')
+        longitude = request.POST.get('longitude')
 
         if User.objects.filter(username=username).exists():
-            return JsonResponse({'error': 'Username already taken'}, status=400)
+            return JsonResponse({'error': 'This username is already taken. Please choose another.'}, status=400)
 
         if User.objects.filter(email=email).exists():
-            return JsonResponse({'error': 'Email already registered. Please login.'}, status=400)
+            return JsonResponse({'error': 'This email is already registered. Please login instead.'}, status=400)
 
         user = User.objects.create(
             username=username,
             email=email,
             password=make_password(password),
+            latitude=float(latitude) if latitude else None,
+            longitude=float(longitude) if longitude else None,
         )
 
         tokens = get_tokens_for_user(user)
@@ -508,6 +493,6 @@ def register(request):
             'message': f'Welcome to SkillMap, {username}!',
             'user_id': user.id,
             'username': user.username,
-            'access': tokens['access'],
+            'access':  tokens['access'],
             'refresh': tokens['refresh'],
         }, status=201)
