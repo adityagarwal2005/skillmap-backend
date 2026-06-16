@@ -3,12 +3,29 @@ from django.utils import timezone
 from datetime import timedelta
 from .models import WorkRequest, WorkRequestResponse, WorkProposal, Conversation, Message
 from users.models import User
-from skills.models import Skill
+from skills.models import Skill, Category
 from users.views import get_user_from_token
 
 
+def get_distance_km(lat1, lon1, lat2, lon2):
+    import math
+    R = 6371
+    d_lat = math.radians(lat2 - lat1)
+    d_lon = math.radians(lon2 - lon1)
+    a = (math.sin(d_lat / 2) ** 2 +
+         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(d_lon / 2) ** 2)
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
 def get_user_from_request(request):
-    return get_user_from_token(request)
+    result = get_user_from_token(request)
+    if isinstance(result, tuple):
+        user = result[0]
+    else:
+        user = result
+    if not user:
+        return None, JsonResponse({'error': 'Unauthorized'}, status=401)
+    return user, None
 
 
 def create_work_request(request):
@@ -25,29 +42,31 @@ def create_work_request(request):
         if not description or not payment_amount or not time_limit_hours or not skills:
             return JsonResponse({"error": "description, payment_amount, time_limit_hours and skills are required"}, status=400)
 
-        skill_list = [s.strip() for s in skills.split(",")]
+        skill_list = [s.strip() for s in skills.split(",") if s.strip()]
         skill_objects = []
         for skill_name in skill_list:
-            try:
-                skill = Skill.objects.get(name__iexact=skill_name)
-                skill_objects.append(skill)
-            except Skill.DoesNotExist:
-                return JsonResponse({"error": f"Skill '{skill_name}' not found. Add it first."}, status=400)
+           skill, _ = Skill.objects.get_or_create(name__iexact=skill_name, defaults={"name": skill_name})
+            skill_objects.append(skill)
 
-        expires_at = timezone.now() + timedelta(hours=int(time_limit_hours))
+        try:
+            expires_at = timezone.now() + timedelta(hours=int(time_limit_hours))
+        except ValueError:
+            return JsonResponse({"error": "time_limit_hours must be a number"}, status=400)
+
         work_request = WorkRequest.objects.create(
             created_by=user,
             description=description,
             payment_amount=float(payment_amount),
             time_limit_hours=int(time_limit_hours),
             expires_at=expires_at,
+            status='open',
         )
         work_request.required_skills.set(skill_objects)
 
         return JsonResponse({
             "message": "Work request created",
             "work_request_id": work_request.id,
-            "expires_at": work_request.expires_at,
+            "expires_at": str(work_request.expires_at),
         }, status=201)
 
     return JsonResponse({"error": "Method not allowed"}, status=405)
@@ -67,9 +86,9 @@ def get_my_work_requests(request, user_id):
                     "time_limit_hours": wr.time_limit_hours,
                     "status": wr.status,
                     "assigned_to": wr.assigned_to.username if wr.assigned_to else None,
-                    "expires_at": wr.expires_at,
+                    "expires_at": str(wr.expires_at),
                     "responses_count": wr.responses.count(),
-                    "created_at": wr.created_at,
+                    "created_at": str(wr.created_at),
                 }
                 for wr in requests
             ]
@@ -81,32 +100,27 @@ def get_my_work_requests(request, user_id):
 
 
 def get_available_work_requests(request, user_id):
-    user = get_user_from_token(request)
-    if not user:
-        return JsonResponse({'error': 'Unauthorized'}, status=401)
+    user, error = get_user_from_request(request)
+    if error:
+        return error
 
-    # Get filter params
     skill_filter = request.GET.get('skill', '').strip().lower()
     radius_km    = float(request.GET.get('radius', 50))
     latitude     = request.GET.get('latitude')
     longitude    = request.GET.get('longitude')
 
-    # Get all open work requests
     work_requests = WorkRequest.objects.filter(status='open')
 
     results = []
     for wr in work_requests:
-        # Skip own requests
         if wr.created_by.id == user.id:
             continue
 
-        # Skill filter
         if skill_filter:
             skills = [s.name.lower() for s in wr.required_skills.all()]
             if not any(skill_filter in s for s in skills):
                 continue
 
-        # Location filter
         if latitude and longitude and wr.created_by.latitude and wr.created_by.longitude:
             distance = get_distance_km(
                 float(latitude), float(longitude),
@@ -124,7 +138,7 @@ def get_available_work_requests(request, user_id):
             'created_by':       wr.created_by.username,
             'skills':           [s.name for s in wr.required_skills.all()],
             'expires_at':       str(wr.expires_at) if wr.expires_at else None,
-            'responses_count':  wr.responses.count() if hasattr(wr, 'responses') else 0,
+            'responses_count':  wr.responses.count(),
         })
 
     return JsonResponse({'work_requests': results})
@@ -183,7 +197,7 @@ def get_work_request_responses(request, work_request_id):
                     "skills": [s.name for s in r.user.skills.all()],
                     "rating": r.user.rating,
                     "message": r.message,
-                    "responded_at": r.created_at,
+                    "responded_at": str(r.created_at),
                 }
                 for r in responses
             ]
@@ -251,13 +265,12 @@ def close_work_request(request, work_request_id):
             work_request.status = 'closed'
             work_request.save()
 
-            # auto create verified portfolio item for assignee
             if work_request.assigned_to:
                 from portfolio.models import PortfolioItem
                 item = PortfolioItem.objects.create(
                     user=work_request.assigned_to,
                     title=f"Completed: {work_request.description[:80]}",
-                    description=f"Completed work for a client. Verified on SkillMap.",
+                    description="Completed work for a client. Verified on SkillMap.",
                     portfolio_type='project',
                     verified=True,
                     verified_via_work=work_request,
@@ -373,7 +386,7 @@ def get_my_proposals(request):
                 "payment_per_hour": p.payment_per_hour,
                 "payment_per_day": p.payment_per_day,
                 "status": p.status,
-                "created_at": p.created_at,
+                "created_at": str(p.created_at),
             }
             for p in proposals
         ]
@@ -402,7 +415,7 @@ def send_message(request, conversation_id):
             return JsonResponse({
                 "message": "Message sent",
                 "message_id": message.id,
-                "created_at": message.created_at,
+                "created_at": str(message.created_at),
             }, status=201)
 
         except Conversation.DoesNotExist:
@@ -432,7 +445,7 @@ def get_messages(request, conversation_id):
                     "id": m.id,
                     "sender": m.sender.username,
                     "text": m.text,
-                    "created_at": m.created_at,
+                    "created_at": str(m.created_at),
                 }
                 for m in messages
             ]
@@ -463,7 +476,7 @@ def get_my_conversations(request):
                 "type": c.conversation_type,
                 "with": other.username if other else None,
                 "last_message": last_message.text if last_message else None,
-                "last_message_at": last_message.created_at if last_message else None,
+                "last_message_at": str(last_message.created_at) if last_message else None,
             })
 
         return JsonResponse({"conversations": data, "count": len(data)})
