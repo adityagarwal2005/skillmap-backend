@@ -45,7 +45,7 @@ def create_work_request(request):
         skill_list = [s.strip() for s in skills.split(",") if s.strip()]
         skill_objects = []
         for skill_name in skill_list:
-           skill, _ = Skill.objects.get_or_create(name__iexact=skill_name, defaults={"name": skill_name})
+            skill, _ = Skill.objects.get_or_create(name__iexact=skill_name, defaults={"name": skill_name})
             skill_objects.append(skill)
 
         try:
