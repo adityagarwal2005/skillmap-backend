@@ -12,6 +12,13 @@ import random
 from django.core.mail import send_mail
 from smtplib import SMTPException
 
+
+import threading
+from django.core.mail import send_mail
+
+import resend
+import os
+
 def get_distance_km(lat1, lon1, lat2, lon2):
     R = 6371
     d_lat = math.radians(lat2 - lat1)
@@ -49,21 +56,18 @@ def get_user_from_token(request):
         return None, JsonResponse({"error": "Invalid or expired token"}, status=401)
 
 
-import threading
-from django.core.mail import send_mail
+
 
 def send_otp_email(username, email, otp):
-    import resend
-    import os
     resend.api_key = os.environ.get('RESEND_API_KEY')
     try:
         resend.Emails.send({
-            "from": "SkillMap <onboarding@resend.dev>",
+            "from": "SkillMap <noreply@doithere.in>",
             "to": [email],
             "subject": "Your SkillMap verification code",
             "text": f"Hi {username},\n\nYour SkillMap verification code is:\n\n{otp}\n\nThis code expires in 10 minutes.\n\n— SkillMap Team"
         })
-        print(f"=== RESEND EMAIL SENT TO {email} ===")
+        print(f"=== OTP EMAIL SENT TO {email} ===")
     except Exception as e:
         print(f"=== RESEND ERROR: {e} ===")
 
@@ -96,19 +100,17 @@ def send_otp(request):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 def verify_otp_and_register(request):
-    """Step 2 — verify OTP and create account"""
     if request.method == 'POST':
-        username = request.POST.get('username')
-        email    = request.POST.get('email')
-        password = request.POST.get('password')
-        otp      = request.POST.get('otp')
+        username  = request.POST.get('username')
+        email     = request.POST.get('email')
+        password  = request.POST.get('password')
+        otp       = request.POST.get('otp')
+        latitude  = request.POST.get('latitude')
+        longitude = request.POST.get('longitude')
 
-        # Find OTP
         try:
             otp_obj = OTPVerification.objects.filter(
-                email=email,
-                otp=otp,
-                is_used=False
+                email=email, otp=otp, is_used=False
             ).latest('created_at')
         except OTPVerification.DoesNotExist:
             return JsonResponse({'error': 'Invalid OTP. Please try again.'}, status=400)
@@ -116,18 +118,18 @@ def verify_otp_and_register(request):
         if otp_obj.is_expired():
             return JsonResponse({'error': 'OTP expired. Please request a new one.'}, status=400)
 
-        # Mark OTP as used
         otp_obj.is_used = True
         otp_obj.save()
 
-        # Create user
         if User.objects.filter(username=username).exists():
-            return JsonResponse({'error': 'Username already taken'}, status=400)
+            return JsonResponse({'error': 'This username is already taken.'}, status=400)
 
         user = User.objects.create(
             username=username,
             email=email,
             password=make_password(password),
+            latitude=float(latitude) if latitude else None,
+            longitude=float(longitude) if longitude else None,
         )
 
         tokens = get_tokens_for_user(user)
@@ -135,7 +137,7 @@ def verify_otp_and_register(request):
             'message': f'Welcome to SkillMap, {username}!',
             'user_id': user.id,
             'username': user.username,
-            'access': tokens['access'],
+            'access':  tokens['access'],
             'refresh': tokens['refresh'],
         }, status=201)
 
