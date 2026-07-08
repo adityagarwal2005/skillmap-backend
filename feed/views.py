@@ -20,6 +20,19 @@ STOP_WORDS = {
 }
 
 
+def parse_pagination(request):
+    """Read ?limit=&offset= from the query string, clamped to sane bounds."""
+    try:
+        limit = int(request.GET.get('limit', 20))
+    except (TypeError, ValueError):
+        limit = 20
+    try:
+        offset = int(request.GET.get('offset', 0))
+    except (TypeError, ValueError):
+        offset = 0
+    return max(1, min(limit, 50)), max(0, offset)
+
+
 def get_distance_km(lat1, lon1, lat2, lon2):
     R = 6371
     d_lat = math.radians(lat2 - lat1)
@@ -125,8 +138,12 @@ def smart_feed(request):
 
     results.sort(key=lambda x: (x['score'], x['item'].created_at.timestamp()), reverse=True)
 
+    limit, offset = parse_pagination(request)
+    total = len(results)
+    page = results[offset:offset + limit]
+
     feed = []
-    for r in results:
+    for r in page:
         item = r['item']
         reactions = Reaction.objects.filter(portfolio_item=item).count()
         comments  = Comment.objects.filter(portfolio_item=item).count()
@@ -150,7 +167,7 @@ def smart_feed(request):
             'comments':  comments,
         })
 
-    return JsonResponse({'feed': feed})
+    return JsonResponse({'feed': feed, 'count': total, 'has_more': offset + limit < total})
 def search_feed(request):
     if request.method == "GET":
         q = request.GET.get("q", "").strip()
@@ -208,8 +225,12 @@ def search_feed(request):
             items = list(items)
             items.sort(key=lambda x: relevance_score(x, search_words), reverse=True)
 
-        data = [format_item(i, request) for i in items]
-        return JsonResponse({"results": data, "count": len(data)})
+        total = items.count() if hasattr(items, 'count') else len(items)
+        limit, offset = parse_pagination(request)
+        page = items[offset:offset + limit]
+
+        data = [format_item(i, request) for i in page]
+        return JsonResponse({"results": data, "count": total, "has_more": offset + limit < total})
 
     return JsonResponse({"error": "Method not allowed"}, status=405)
 def trending_feed(request):
@@ -234,7 +255,11 @@ def trending_feed(request):
 
         items = sorted(items, key=lambda x: x.reactions.count(), reverse=True)
 
-        data = [format_item(i, request) for i in items[:20]]
-        return JsonResponse({"trending": data, "count": len(data)})
+        total = len(items)
+        limit, offset = parse_pagination(request)
+        page = items[offset:offset + limit]
+
+        data = [format_item(i, request) for i in page]
+        return JsonResponse({"trending": data, "count": total, "has_more": offset + limit < total})
 
     return JsonResponse({"error": "Method not allowed"}, status=405)

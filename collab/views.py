@@ -9,6 +9,19 @@ def get_user_from_request(request):
     return get_user_from_token(request)
 
 
+def parse_pagination(request):
+    """Read ?limit=&offset= from the query string, clamped to sane bounds."""
+    try:
+        limit = int(request.GET.get('limit', 20))
+    except (TypeError, ValueError):
+        limit = 20
+    try:
+        offset = int(request.GET.get('offset', 0))
+    except (TypeError, ValueError):
+        offset = 0
+    return max(1, min(limit, 50)), max(0, offset)
+
+
 def create_collab_post(request):
     if request.method == "POST":
         user, error = get_user_from_request(request)
@@ -106,7 +119,10 @@ def show_collab_posts(request):
             'applicants':   post.requests.count() if hasattr(post, 'requests') else 0,
         })
 
-    return JsonResponse({'collab_posts': results})
+    total = len(results)
+    limit, offset = parse_pagination(request)
+    page = results[offset:offset + limit]
+    return JsonResponse({'collab_posts': page, 'count': total, 'has_more': offset + limit < total})
 
 def show_my_collab_posts(request):
     """Show all collab posts created by logged in user"""

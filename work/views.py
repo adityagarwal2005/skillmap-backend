@@ -17,6 +17,19 @@ def get_distance_km(lat1, lon1, lat2, lon2):
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
+def parse_pagination(request):
+    """Read ?limit=&offset= from the query string, clamped to sane bounds."""
+    try:
+        limit = int(request.GET.get('limit', 20))
+    except (TypeError, ValueError):
+        limit = 20
+    try:
+        offset = int(request.GET.get('offset', 0))
+    except (TypeError, ValueError):
+        offset = 0
+    return max(1, min(limit, 50)), max(0, offset)
+
+
 def get_user_from_request(request):
     result = get_user_from_token(request)
     if isinstance(result, tuple):
@@ -141,7 +154,10 @@ def get_available_work_requests(request, user_id):
             'responses_count':  wr.responses.count(),
         })
 
-    return JsonResponse({'work_requests': results})
+    total = len(results)
+    limit, offset = parse_pagination(request)
+    page = results[offset:offset + limit]
+    return JsonResponse({'work_requests': page, 'count': total, 'has_more': offset + limit < total})
 
 
 def respond_to_work_request(request, work_request_id):

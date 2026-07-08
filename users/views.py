@@ -446,7 +446,18 @@ def search_users(request):
                 'longitude': u.longitude,
             })
 
-        return JsonResponse({'results': results})
+        total = len(results)
+        try:
+            limit = max(1, min(int(request.GET.get('limit', 20)), 50))
+        except (TypeError, ValueError):
+            limit = 20
+        try:
+            offset = max(0, int(request.GET.get('offset', 0)))
+        except (TypeError, ValueError):
+            offset = 0
+        page = results[offset:offset + limit]
+
+        return JsonResponse({'results': page, 'count': total, 'has_more': offset + limit < total})
 
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
