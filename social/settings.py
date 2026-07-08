@@ -144,7 +144,12 @@ for _origin in [
 CORS_ALLOWED_ORIGIN_REGEXES = [r"^https://.*\.vercel\.app$"]
 
 # Django needs these to trust the domain for admin/CSRF over HTTPS.
-CSRF_TRUSTED_ORIGINS = ['https://doithere.in', 'https://www.doithere.in']
+CSRF_TRUSTED_ORIGINS = [
+    'https://doithere.in',
+    'https://www.doithere.in',
+    'https://api.doithere.in',
+    'https://skillmap-backend-498t.onrender.com',
+]
 
 # JWT
 SIMPLE_JWT = {
@@ -162,6 +167,20 @@ REST_FRAMEWORK = {
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+
+# ── Production security hardening ──
+# Kicks in automatically once DEBUG is False (set DEBUG=False in Render env).
+if not DEBUG:
+    # Render terminates TLS at its proxy and forwards this header.
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31536000          # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = 'DENY'
 EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
 EMAIL_PORT = int(os.environ.get('EMAIL_PORT', 587))
 EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER')
