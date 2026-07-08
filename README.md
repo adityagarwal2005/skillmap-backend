@@ -210,7 +210,11 @@ EMAIL_HOST= EMAIL_HOST_USER= EMAIL_HOST_PASSWORD= EMAIL_PORT= EMAIL_USE_TLS=
 
 **Render (backend)**
 - Set every key from `.env.example` in **Environment**. Keep **`DEBUG=False`** in production (turns on HSTS + secure cookies automatically).
-- **Migrations must run on deploy** — set the Render *Pre-Deploy Command* (or Start Command prefix) to `python manage.py migrate`. Render does **not** read the `Procfile` automatically.
+- **Migrations + category seed must run on deploy.** Render does **not** read the `Procfile` automatically, and the free tier has **no Shell**, so bake everything into the dashboard **Start Command** (Settings → Start Command). Use the full command below — it runs migrations, collects static, seeds the campus categories (idempotent), then starts gunicorn:
+  ```
+  python manage.py migrate --noinput || true; python manage.py collectstatic --noinput || true; python manage.py seed_categories --replace || true; gunicorn social.wsgi --log-file - --timeout 120 --workers 1 --threads 4
+  ```
+  `seed_categories` is idempotent, so running it on every deploy is safe; `--replace` keeps the category list pinned to exactly the campus set defined in `skills/management/commands/seed_categories.py`. To change the categories, edit that file and redeploy.
 
 **Vercel (frontend)**
 - Set `REACT_APP_API_URL` to the Render backend URL. This is the single source of truth for where the app calls the API.
