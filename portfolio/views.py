@@ -39,30 +39,33 @@ def create_portfolio_item(request):
             longitude=float(longitude) if longitude else None,
         )
 
-        # add skills (optional)
+        # add skills (optional) — known skills attach as skills; anything we
+        # don't recognise is kept as a tag instead of rejecting the whole post.
+        extra_tags = []
         if skills_input:
-            skill_list = [s.strip() for s in skills_input.split(",")]
+            skill_list = [s.strip() for s in skills_input.split(",") if s.strip()]
             skill_objects = []
-            invalid = []
             for skill_name in skill_list:
                 try:
                     skill = Skill.objects.get(name__iexact=skill_name)
                     skill_objects.append(skill)
                 except Skill.DoesNotExist:
-                    invalid.append(skill_name)
-            if invalid:
-                item.delete()
-                return JsonResponse({"error": f"Invalid skills: {', '.join(invalid)}"}, status=400)
-            item.skills.set(skill_objects)
+                    tag, _ = Tag.objects.get_or_create(name=skill_name)
+                    extra_tags.append(tag)
+            if skill_objects:
+                item.skills.set(skill_objects)
 
         # add tags (optional)
         if tags_input:
-            tag_list = [t.strip() for t in tags_input.split(",")]
+            tag_list = [t.strip() for t in tags_input.split(",") if t.strip()]
             tag_objects = []
             for tag_name in tag_list:
                 tag, _ = Tag.objects.get_or_create(name=tag_name)
                 tag_objects.append(tag)
             item.tags.set(tag_objects)
+
+        if extra_tags:
+            item.tags.add(*extra_tags)
 
         return JsonResponse({
             "message": "Portfolio item created",
