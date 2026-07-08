@@ -49,6 +49,26 @@ CAMPUS_CATEGORIES = {
         "Social Media", "Digital Marketing", "SEO",
         "Branding", "Sales", "Public Speaking",
     ],
+    "Tutoring & Academics": [
+        "Maths", "Physics", "Chemistry", "Coding Help",
+        "Doubt Solving", "Subject Tutoring",
+    ],
+    "Music & Performance": [
+        "Singing", "Guitar", "Keyboard", "Dance", "DJ", "Music Production",
+    ],
+    "Sports & Fitness": [
+        "Gym Training", "Cricket", "Football", "Yoga", "Athletics", "Nutrition",
+    ],
+    "Art & Craft": [
+        "Painting", "Sketching", "Handmade Crafts",
+        "Calligraphy", "Resin Art", "Origami",
+    ],
+    "Gaming & Esports": [
+        "Game Development", "Streaming", "Esports",
+        "Unity", "Level Design", "Game Art",
+    ],
+    # Catch-all bucket — no preset skills; users add their own.
+    "Other": [],
 }
 
 
