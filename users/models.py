@@ -24,6 +24,7 @@ class User(models.Model):
     github_url = models.URLField(null=True, blank=True)
     instagram_url = models.URLField(null=True, blank=True)
     dob = models.DateField(null=True, blank=True)
+    profile_image = models.ImageField(upload_to='avatars/', null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='not_available')
     created_at = models.DateTimeField(auto_now_add=True, null=True)
 

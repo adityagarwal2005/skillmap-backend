@@ -302,6 +302,7 @@ def get_user(request, user_id):
                 "github_url": user.github_url,
                 "instagram_url": user.instagram_url,
                 "dob": user.dob,
+                "profile_image": user.profile_image.url if user.profile_image else None,
                 "created_at": user.created_at,
             })
         except User.DoesNotExist:
@@ -348,6 +349,9 @@ def edit_user(request, user_id):
             user.instagram_url = instagram_url
         if dob:
             user.dob = dob
+        profile_image = request.FILES.get("profile_image")
+        if profile_image:
+            user.profile_image = profile_image
         if category_id:
             try:
                 user.category = Category.objects.get(id=category_id)
@@ -433,6 +437,7 @@ def search_users(request):
                 'id':       u.id,
                 'username': u.username,
                 'category': u.category.name if u.category else None,
+                'profile_image': u.profile_image.url if u.profile_image else None,
                 'skills':   [s.name for s in u.skills.all()],
                 'rating':   u.rating,
                 'status':   u.status,
