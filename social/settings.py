@@ -122,17 +122,29 @@ CLOUDINARY_STORAGE = {
 
 MEDIA_URL = '/media/'
 
-# CORS
+# CORS — allow local dev, the production domain, all Vercel deploys, plus any
+# origins listed in the CORS_ALLOWED_ORIGINS env var. No longer wide-open.
 CORS_ALLOWED_ORIGINS = [
     origin.strip()
-    for origin in os.environ.get(
-        'CORS_ALLOWED_ORIGINS',
-        'http://localhost:3000,http://127.0.0.1:3000'
-    ).split(',')
+    for origin in os.environ.get('CORS_ALLOWED_ORIGINS', '').split(',')
     if origin.strip()
 ]
 
-CORS_ALLOW_ALL_ORIGINS = True  # temporary fix
+# Always trust these, regardless of env config, so the live site can't break.
+for _origin in [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'https://doithere.in',
+    'https://www.doithere.in',
+]:
+    if _origin not in CORS_ALLOWED_ORIGINS:
+        CORS_ALLOWED_ORIGINS.append(_origin)
+
+# Any Vercel preview/production deployment (*.vercel.app)
+CORS_ALLOWED_ORIGIN_REGEXES = [r"^https://.*\.vercel\.app$"]
+
+# Django needs these to trust the domain for admin/CSRF over HTTPS.
+CSRF_TRUSTED_ORIGINS = ['https://doithere.in', 'https://www.doithere.in']
 
 # JWT
 SIMPLE_JWT = {

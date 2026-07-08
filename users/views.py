@@ -1,23 +1,18 @@
 from django.http import JsonResponse
 from django.contrib.auth.hashers import make_password, check_password
+from django.core.mail import send_mail
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import User, StudentProfile
+from smtplib import SMTPException
+from .models import User, StudentProfile, OTPVerification
 from skills.models import Category, Skill
 import math
-
-from django.core.mail import send_mail
-from .models import OTPVerification
 import random
-
-from django.core.mail import send_mail
-from smtplib import SMTPException
-
-
 import threading
-from django.core.mail import send_mail
-
 import resend
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 def get_distance_km(lat1, lon1, lat2, lon2):
     R = 6371
@@ -67,9 +62,9 @@ def send_otp_email(username, email, otp):
             "subject": "Your SkillMap verification code",
             "text": f"Hi {username},\n\nYour SkillMap verification code is:\n\n{otp}\n\nThis code expires in 10 minutes.\n\n— SkillMap Team"
         })
-        print(f"=== OTP EMAIL SENT TO {email} ===")
+        logger.info("OTP email sent to %s", email)
     except Exception as e:
-        print(f"=== RESEND ERROR: {e} ===")
+        logger.error("Resend error sending OTP to %s: %s", email, e)
 
 def send_otp(request):
     if request.method == 'POST':
@@ -88,9 +83,8 @@ def send_otp(request):
         OTPVerification.objects.create(email=email, otp=otp)
 
 
-        import os
         if os.environ.get('DEBUG') == 'True':
-            print(f"=== LOCAL OTP FOR {email}: {otp} ===")       
+            logger.info("Local OTP for %s: %s", email, otp)
 
         # Send email in background thread so it doesn't block
         thread = threading.Thread(
@@ -465,7 +459,7 @@ def test_email(request):
                 fail_silently=False,
             )
         except Exception as e:
-            print(f"Email error: {e}")
+            logger.error("Email error: %s", e)
 
     thread = threading.Thread(target=_send)
     thread.daemon = True
