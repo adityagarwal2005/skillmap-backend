@@ -572,6 +572,40 @@ def search_users(request):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 
+def discover_users(request):
+    """A few people to surface on the feed so a fresh install never looks empty.
+    Newest members first, excluding yourself and anyone blocked either way."""
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    me, _ = get_user_from_token(request)  # optional — page is authed anyway
+
+    qs = User.objects.all().order_by('-created_at')
+    if me:
+        qs = qs.exclude(id=me.id)
+        blocked = set(Block.objects.filter(blocker=me).values_list('blocked_id', flat=True))
+        blocked_by = set(Block.objects.filter(blocked=me).values_list('blocker_id', flat=True))
+        exclude_ids = blocked | blocked_by
+        if exclude_ids:
+            qs = qs.exclude(id__in=exclude_ids)
+
+    try:
+        limit = max(1, min(int(request.GET.get('limit', 12)), 30))
+    except (TypeError, ValueError):
+        limit = 12
+
+    results = [{
+        'id': u.id,
+        'username': u.username,
+        'category': u.category.name if u.category else None,
+        'profile_image': request.build_absolute_uri(u.profile_image.url) if u.profile_image else None,
+        'skills': [s.name for s in u.skills.all()][:4],
+        'status': u.status,
+    } for u in qs[:limit]]
+
+    return JsonResponse({'results': results})
+
+
 def add_student_profile(request, user_id):
     if request.method == "POST":
         user, error = get_user_from_token(request)
