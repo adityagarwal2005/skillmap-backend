@@ -1,4 +1,5 @@
 from django.http import JsonResponse
+from django.db.models import Q
 from .models import Category, Skill, UserSkill, Certificate
 from users.models import User
 from users.views import get_user_from_token
@@ -32,8 +33,11 @@ def get_category_skills(request, category_id):
     if request.method == "GET":
         try:
             category = Category.objects.get(id=category_id)
+            # Skills seeded onto the category itself, plus any skills real users
+            # in this category actually have — so the filter is useful even for
+            # a brand-new campus category with no members yet.
             skills = Skill.objects.filter(
-                userskill__user__category=category
+                Q(category=category) | Q(userskill__user__category=category)
             ).distinct()
             data = [{"id": s.id, "name": s.name} for s in skills]
             return JsonResponse({"category": category.name, "skills": data})

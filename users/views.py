@@ -494,22 +494,40 @@ def update_status(request):
 
 def search_users(request):
     if request.method == 'GET':
+        from django.db.models import Q
+
         category_id = request.GET.get('category_id')
         latitude    = request.GET.get('latitude')
         longitude   = request.GET.get('longitude')
         radius_km   = float(request.GET.get('radius', 50))
         skills      = request.GET.get('skills', '').strip()
+        query       = request.GET.get('q', '').strip()
 
-        if not category_id:
-            return JsonResponse({'error': 'Category is required'}, status=400)
+        # A search needs at least one narrowing filter so we never dump the
+        # whole user table. Category, a free-text query, or skills all qualify.
+        if not (category_id or query or skills):
+            return JsonResponse({'error': 'Enter a search term or pick a category'}, status=400)
 
-        users = User.objects.filter(category_id=category_id)
+        users = User.objects.all()
 
-        # skill filter
+        if category_id:
+            users = users.filter(category_id=category_id)
+
+        # free-text search across name, category, and skills
+        if query:
+            users = users.filter(
+                Q(username__icontains=query) |
+                Q(category__name__icontains=query) |
+                Q(skills__name__icontains=query)
+            )
+
+        # explicit skill-chip filter
         if skills:
             skill_list = [s.strip().lower() for s in skills.split(',')]
             for skill in skill_list:
                 users = users.filter(skills__name__icontains=skill)
+
+        users = users.distinct()
 
         results = []
         for u in users:
