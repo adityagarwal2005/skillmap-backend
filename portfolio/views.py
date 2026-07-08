@@ -348,7 +348,9 @@ def show_item_comments(request, item_id):
             data = [
                 {
                     "id": c.id,
+                    "user_id": c.user.id,
                     "username": c.user.username,
+                    "profile_image": request.build_absolute_uri(c.user.profile_image.url) if c.user.profile_image else None,
                     "text": c.text,
                     "created_at": c.created_at,
                 }

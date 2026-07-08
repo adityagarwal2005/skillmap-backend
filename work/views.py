@@ -460,6 +460,7 @@ def get_messages(request, conversation_id):
                 {
                     "id": m.id,
                     "sender": m.sender.username,
+                    "sender_avatar": request.build_absolute_uri(m.sender.profile_image.url) if m.sender.profile_image else None,
                     "text": m.text,
                     "created_at": str(m.created_at),
                 }
@@ -491,6 +492,8 @@ def get_my_conversations(request):
                 "id": c.id,
                 "type": c.conversation_type,
                 "with": other.username if other else None,
+                "with_id": other.id if other else None,
+                "with_avatar": request.build_absolute_uri(other.profile_image.url) if other and other.profile_image else None,
                 "last_message": last_message.text if last_message else None,
                 "last_message_at": str(last_message.created_at) if last_message else None,
             })
