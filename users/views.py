@@ -3,7 +3,7 @@ from django.contrib.auth.hashers import make_password, check_password
 from django.core.mail import send_mail
 from rest_framework_simplejwt.tokens import RefreshToken
 from smtplib import SMTPException
-from .models import User, StudentProfile, OTPVerification
+from .models import User, StudentProfile, OTPVerification, Block, Report
 from skills.models import Category, Skill
 import math
 import random
@@ -51,6 +51,98 @@ def get_user_from_token(request):
         return None, JsonResponse({"error": "Invalid or expired token"}, status=401)
 
 
+
+
+def block_user(request, user_id):
+    """Block another user: hides their posts from your feed and stops messaging."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    user, error = get_user_from_token(request)
+    if error:
+        return error
+
+    if user.id == user_id:
+        return JsonResponse({"error": "You can't block yourself"}, status=400)
+
+    try:
+        target = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return JsonResponse({"error": "User not found"}, status=404)
+
+    Block.objects.get_or_create(blocker=user, blocked=target)
+    return JsonResponse({"message": f"Blocked {target.username}"})
+
+
+def unblock_user(request, user_id):
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    user, error = get_user_from_token(request)
+    if error:
+        return error
+
+    Block.objects.filter(blocker=user, blocked_id=user_id).delete()
+    return JsonResponse({"message": "Unblocked"})
+
+
+def get_blocked_users(request):
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    user, error = get_user_from_token(request)
+    if error:
+        return error
+
+    blocks = Block.objects.filter(blocker=user).select_related('blocked')
+    data = [
+        {"id": b.blocked.id, "username": b.blocked.username, "blocked_at": b.created_at}
+        for b in blocks
+    ]
+    return JsonResponse({"blocked_users": data, "count": len(data)})
+
+
+def report_content(request):
+    """Report a user or a post. report_type: 'user' or 'post'; target_id; reason; details (optional)."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    user, error = get_user_from_token(request)
+    if error:
+        return error
+
+    report_type = request.POST.get("report_type", "").strip()
+    target_id = request.POST.get("target_id", "").strip()
+    reason = request.POST.get("reason", "").strip()
+    details = request.POST.get("details", "").strip()
+
+    valid_reasons = [c[0] for c in Report.REASON_CHOICES]
+    if report_type not in ("user", "post"):
+        return JsonResponse({"error": "report_type must be 'user' or 'post'"}, status=400)
+    if reason not in valid_reasons:
+        return JsonResponse({"error": f"reason must be one of: {', '.join(valid_reasons)}"}, status=400)
+    if not target_id:
+        return JsonResponse({"error": "target_id is required"}, status=400)
+
+    report = Report(reporter=user, report_type=report_type, reason=reason, details=details)
+
+    if report_type == "user":
+        try:
+            reported_user = User.objects.get(id=target_id)
+        except User.DoesNotExist:
+            return JsonResponse({"error": "User not found"}, status=404)
+        if reported_user.id == user.id:
+            return JsonResponse({"error": "You can't report yourself"}, status=400)
+        report.reported_user = reported_user
+    else:
+        from portfolio.models import PortfolioItem
+        try:
+            report.reported_post = PortfolioItem.objects.get(id=target_id)
+        except PortfolioItem.DoesNotExist:
+            return JsonResponse({"error": "Post not found"}, status=404)
+
+    report.save()
+    return JsonResponse({"message": "Report submitted. Thanks for helping keep SkillMap safe."})
 
 
 def send_otp_email(username, email, otp):

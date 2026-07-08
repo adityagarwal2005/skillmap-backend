@@ -48,6 +48,12 @@ urlpatterns = [
     path("users/<int:user_id>/change-password/", csrf_exempt(user_views.change_password)),
     path("users/<int:user_id>/delete/", csrf_exempt(user_views.delete_user)),
 
+    # Trust & Safety
+    path("users/<int:user_id>/block/", csrf_exempt(user_views.block_user)),
+    path("users/<int:user_id>/unblock/", csrf_exempt(user_views.unblock_user)),
+    path("users/blocked/", csrf_exempt(user_views.get_blocked_users)),
+    path("reports/create/", csrf_exempt(user_views.report_content)),
+
     # Student Profile
     path("users/<int:user_id>/student-profile/", csrf_exempt(user_views.get_student_profile)),
     path("users/<int:user_id>/student-profile/add/", csrf_exempt(user_views.add_student_profile)),

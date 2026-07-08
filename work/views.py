@@ -423,6 +423,14 @@ def send_message(request, conversation_id):
             if not conversation.participants.filter(id=user.id).exists():
                 return JsonResponse({"error": "You are not part of this conversation"}, status=403)
 
+            from django.db.models import Q
+            from users.models import Block
+            other = conversation.participants.exclude(id=user.id).first()
+            if other and Block.objects.filter(
+                Q(blocker=user, blocked=other) | Q(blocker=other, blocked=user)
+            ).exists():
+                return JsonResponse({"error": "You can't message this user"}, status=403)
+
             text = request.POST.get("text", "").strip()
             if not text:
                 return JsonResponse({"error": "Message text is required"}, status=400)

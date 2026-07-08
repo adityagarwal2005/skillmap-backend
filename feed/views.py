@@ -1,6 +1,6 @@
 from django.http import JsonResponse
 from django.db.models import Q
-from users.models import User
+from users.models import User, Block
 from skills.models import Skill, Tag
 from users.views import get_user_from_token
 import math
@@ -114,7 +114,8 @@ def smart_feed(request):
     user_skills = [s.name.lower() for s in user.skills.all()]
     user_category = user.category
 
-    items = PortfolioItem.objects.all().order_by('-created_at')
+    blocked_ids = Block.objects.filter(blocker=user).values_list('blocked_id', flat=True)
+    items = PortfolioItem.objects.exclude(user_id__in=blocked_ids).order_by('-created_at')
 
     results = []
     for item in items:
@@ -244,11 +245,12 @@ def trending_feed(request):
 
         one_week_ago = timezone.now() - timedelta(days=7)
 
+        blocked_ids = Block.objects.filter(blocker=user).values_list('blocked_id', flat=True)
         items = PortfolioItem.objects.select_related(
             "user", "user__category"
         ).prefetch_related(
             "skills", "tags", "media", "reactions", "comments"
-        ).filter(created_at__gte=one_week_ago)
+        ).filter(created_at__gte=one_week_ago).exclude(user_id__in=blocked_ids)
 
         if user.category:
             items = items.filter(user__category=user.category)

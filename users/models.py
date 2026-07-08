@@ -60,3 +60,47 @@ class OTPVerification(models.Model):
 
     def is_expired(self):
         return (timezone.now() - self.created_at).seconds > 600  # 10 min expiry
+
+
+class Block(models.Model):
+    """blocker no longer sees blocked's posts / can message them."""
+    blocker = models.ForeignKey(User, on_delete=models.CASCADE, related_name='blocking')
+    blocked = models.ForeignKey(User, on_delete=models.CASCADE, related_name='blocked_by')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('blocker', 'blocked')
+
+    def __str__(self):
+        return f"{self.blocker.username} blocked {self.blocked.username}"
+
+
+class Report(models.Model):
+    REPORT_TYPE_CHOICES = [
+        ('user', 'User'),
+        ('post', 'Post'),
+    ]
+    REASON_CHOICES = [
+        ('spam', 'Spam'),
+        ('harassment', 'Harassment or bullying'),
+        ('inappropriate', 'Inappropriate content'),
+        ('scam', 'Scam or fraud'),
+        ('other', 'Other'),
+    ]
+
+    reporter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reports_made')
+    report_type = models.CharField(max_length=10, choices=REPORT_TYPE_CHOICES)
+    reported_user = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.CASCADE, related_name='reports_received'
+    )
+    reported_post = models.ForeignKey(
+        'portfolio.PortfolioItem', null=True, blank=True,
+        on_delete=models.CASCADE, related_name='reports'
+    )
+    reason = models.CharField(max_length=20, choices=REASON_CHOICES)
+    details = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        target = self.reported_user.username if self.reported_user else f"post #{self.reported_post_id}"
+        return f"{self.reporter.username} reported {target} ({self.reason})"
