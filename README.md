@@ -11,7 +11,7 @@
 
 **Find skilled people near you. Post your work. Get hired. No degree required.**
 
-[🌐 Live Demo](https://skillmap-frontend-two.vercel.app) · [Backend API](https://skillmap-backend-production-cea2.up.railway.app) · [Frontend Repo](https://github.com/adityagarwal2005/skillmap-frontend)
+[🌐 Live Demo](https://www.doithere.in) · [Backend API](https://api.doithere.in) · [Frontend Repo](https://github.com/adityagarwal2005/skillmap-frontend)
 
 </div>
 
@@ -46,7 +46,7 @@ India has millions of skilled people — developers, designers, bakers, photogra
 | Database | PostgreSQL (Supabase) |
 | Frontend | React 18, Context API, Axios |
 | Storage | Cloudinary |
-| Backend Deploy | Railway |
+| Backend Deploy | Render |
 | Frontend Deploy | Vercel |
 
 ---
@@ -56,7 +56,7 @@ User Browser
 ↓
 Vercel (React Frontend)
 ↓  REST API calls
-Railway (Django Backend)
+Render (Django Backend)
 ↓  ORM queries
 Supabase (PostgreSQL)
 ↓  file uploads
