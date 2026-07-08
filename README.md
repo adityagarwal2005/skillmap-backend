@@ -182,16 +182,40 @@ npm start
 
 ## Environment Variables
 
+See **[`.env.example`](.env.example)** for the full, documented list. Required keys:
+
 ```env
-SECRET_KEY=
-DEBUG=False
-ALLOWED_HOSTS=
-DATABASE_URL=
-CORS_ALLOWED_ORIGINS=
+SECRET_KEY=            # long random string
+DEBUG=                 # False in production, True for local dev
+ALLOWED_HOSTS=         # api.doithere.in,skillmap-backend-498t.onrender.com,localhost
+DATABASE_URL=          # Supabase Postgres connection string
+CORS_ALLOWED_ORIGINS=  # https://doithere.in,https://www.doithere.in,http://localhost:3000
 CLOUDINARY_CLOUD_NAME=
 CLOUDINARY_API_KEY=
 CLOUDINARY_API_SECRET=
+RESEND_API_KEY=        # OTP emails
+EMAIL_HOST= EMAIL_HOST_USER= EMAIL_HOST_PASSWORD= EMAIL_PORT= EMAIL_USE_TLS=
 ```
+
+---
+
+## Deployment
+
+| Piece    | Host      | Domain                                   | Trigger              |
+|----------|-----------|------------------------------------------|----------------------|
+| Backend  | **Render**| `api.doithere.in` · `skillmap-backend-498t.onrender.com` | push to `main` |
+| Frontend | **Vercel**| `doithere.in` · `www.doithere.in`        | push to `main`       |
+| Database | Supabase  | (private, via `DATABASE_URL`)            | —                    |
+| DNS      | GoDaddy   | `doithere.in`                            | —                    |
+
+**Render (backend)**
+- Set every key from `.env.example` in **Environment**. Keep **`DEBUG=False`** in production (turns on HSTS + secure cookies automatically).
+- **Migrations must run on deploy** — set the Render *Pre-Deploy Command* (or Start Command prefix) to `python manage.py migrate`. Render does **not** read the `Procfile` automatically.
+
+**Vercel (frontend)**
+- Set `REACT_APP_API_URL` to the Render backend URL. This is the single source of truth for where the app calls the API.
+
+> ⚠️ **Gotcha:** the local `.env`'s `DATABASE_URL` points at the **same Supabase database as production**. Running `python manage.py migrate` on your laptop changes the live DB. Use a separate local database for safe development.
 
 ---
 
