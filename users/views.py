@@ -141,6 +141,32 @@ def verify_otp_and_register(request):
         }, status=201)
 
 
+def change_password(request, user_id):
+    """Change password after verifying the current one."""
+    if request.method == "POST":
+        user, error = get_user_from_token(request)
+        if error:
+            return error
+        if user.id != user_id:
+            return JsonResponse({"error": "You can only change your own password"}, status=403)
+
+        current = request.POST.get("current_password", "")
+        new = request.POST.get("new_password", "")
+
+        if not new:
+            return JsonResponse({"error": "New password is required"}, status=400)
+        if len(new) < 6:
+            return JsonResponse({"error": "New password must be at least 6 characters"}, status=400)
+        if not check_password(current, user.password):
+            return JsonResponse({"error": "Current password is incorrect"}, status=400)
+
+        user.password = make_password(new)
+        user.save()
+        return JsonResponse({"message": "Password updated"})
+
+    return JsonResponse({"error": "Method not allowed"}, status=405)
+
+
 def send_login_otp(request):
     """Send a one-time login code to an EXISTING account's email."""
     if request.method == 'POST':
@@ -275,6 +301,7 @@ def get_user(request, user_id):
                 "linkedin_url": user.linkedin_url,
                 "github_url": user.github_url,
                 "instagram_url": user.instagram_url,
+                "dob": user.dob,
                 "created_at": user.created_at,
             })
         except User.DoesNotExist:
@@ -301,6 +328,7 @@ def edit_user(request, user_id):
         linkedin_url = request.POST.get("linkedin_url", "").strip()
         github_url = request.POST.get("github_url", "").strip()
         instagram_url = request.POST.get("instagram_url", "").strip()
+        dob = request.POST.get("dob", "").strip()
 
         if username:
             user.username = username
@@ -318,6 +346,8 @@ def edit_user(request, user_id):
             user.github_url = github_url
         if instagram_url:
             user.instagram_url = instagram_url
+        if dob:
+            user.dob = dob
         if category_id:
             try:
                 user.category = Category.objects.get(id=category_id)

@@ -45,6 +45,7 @@ urlpatterns = [
     path("users/search/", csrf_exempt(user_views.search_users)),
     path("users/<int:user_id>/", csrf_exempt(user_views.get_user)),
     path("users/<int:user_id>/edit/", csrf_exempt(user_views.edit_user)),
+    path("users/<int:user_id>/change-password/", csrf_exempt(user_views.change_password)),
     path("users/<int:user_id>/delete/", csrf_exempt(user_views.delete_user)),
 
     # Student Profile
