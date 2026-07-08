@@ -109,10 +109,21 @@ USE_TZ = True
 # STATIC FILES
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
-# MEDIA (Cloudinary)
-DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
+# MEDIA + STATIC storage backends.
+# Django 5.1+ (we're on 6.0) ignores the legacy DEFAULT_FILE_STORAGE /
+# STATICFILES_STORAGE settings entirely — STORAGES is the only thing that
+# takes effect. Without this dict, uploads silently fell back to local disk
+# (ephemeral on Render) instead of Cloudinary, saving relative /media/ URLs
+# that 404 on the frontend domain.
+STORAGES = {
+    'default': {
+        'BACKEND': 'cloudinary_storage.storage.MediaCloudinaryStorage',
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
 
 CLOUDINARY_STORAGE = {
     'CLOUD_NAME': os.environ.get('CLOUDINARY_CLOUD_NAME'),

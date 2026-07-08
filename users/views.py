@@ -302,7 +302,7 @@ def get_user(request, user_id):
                 "github_url": user.github_url,
                 "instagram_url": user.instagram_url,
                 "dob": user.dob,
-                "profile_image": user.profile_image.url if user.profile_image else None,
+                "profile_image": request.build_absolute_uri(user.profile_image.url) if user.profile_image else None,
                 "created_at": user.created_at,
             })
         except User.DoesNotExist:
@@ -437,7 +437,7 @@ def search_users(request):
                 'id':       u.id,
                 'username': u.username,
                 'category': u.category.name if u.category else None,
-                'profile_image': u.profile_image.url if u.profile_image else None,
+                'profile_image': request.build_absolute_uri(u.profile_image.url) if u.profile_image else None,
                 'skills':   [s.name for s in u.skills.all()],
                 'rating':   u.rating,
                 'status':   u.status,
