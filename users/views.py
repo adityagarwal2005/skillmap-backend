@@ -141,6 +141,75 @@ def verify_otp_and_register(request):
         }, status=201)
 
 
+def send_login_otp(request):
+    """Send a one-time login code to an EXISTING account's email."""
+    if request.method == 'POST':
+        email = request.POST.get('email', '').strip()
+        if not email:
+            return JsonResponse({'error': 'Email is required'}, status=400)
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return JsonResponse(
+                {'error': 'No account found with this email. Please register.'},
+                status=404,
+            )
+
+        otp = str(random.randint(100000, 999999))
+        OTPVerification.objects.filter(email=email).delete()
+        OTPVerification.objects.create(email=email, otp=otp)
+
+        if os.environ.get('DEBUG') == 'True':
+            logger.info("Login OTP for %s: %s", email, otp)
+
+        thread = threading.Thread(
+            target=send_otp_email, args=(user.username, email, otp)
+        )
+        thread.daemon = True
+        thread.start()
+
+        return JsonResponse({'message': 'Login code sent to your email'})
+
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+
+def verify_login_otp(request):
+    """Verify a login code and sign the existing user in (no account created)."""
+    if request.method == 'POST':
+        email = request.POST.get('email', '').strip()
+        otp   = request.POST.get('otp', '').strip()
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return JsonResponse({'error': 'No account found with this email.'}, status=404)
+
+        try:
+            otp_obj = OTPVerification.objects.filter(
+                email=email, otp=otp, is_used=False
+            ).latest('created_at')
+        except OTPVerification.DoesNotExist:
+            return JsonResponse({'error': 'Invalid code. Please try again.'}, status=400)
+
+        if otp_obj.is_expired():
+            return JsonResponse({'error': 'Code expired. Please request a new one.'}, status=400)
+
+        otp_obj.is_used = True
+        otp_obj.save()
+
+        tokens = get_tokens_for_user(user)
+        return JsonResponse({
+            'message': f'Welcome back, {user.username}!',
+            'user_id': user.id,
+            'username': user.username,
+            'access':  tokens['access'],
+            'refresh': tokens['refresh'],
+        })
+
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+
 def login(request):
     if request.method == 'POST':
         identifier = request.POST.get('username') or request.POST.get('identifier')

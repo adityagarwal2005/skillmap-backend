@@ -36,6 +36,8 @@ urlpatterns = [
     path("users/send-otp/", csrf_exempt(user_views.send_otp)),
     path("users/verify-register/", csrf_exempt(user_views.verify_otp_and_register)),
     path("users/login/", csrf_exempt(user_views.login)),
+    path("users/login/send-otp/", csrf_exempt(user_views.send_login_otp)),
+    path("users/login/verify-otp/", csrf_exempt(user_views.verify_login_otp)),
     path("users/token/refresh/", csrf_exempt(user_views.refresh_token)),
     path("users/status/update/", csrf_exempt(user_views.update_status)),
 
