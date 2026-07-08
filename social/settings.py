@@ -171,9 +171,10 @@ EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 # ── Production security hardening ──
 # Kicks in automatically once DEBUG is False (set DEBUG=False in Render env).
 if not DEBUG:
-    # Render terminates TLS at its proxy and forwards this header.
+    # Render terminates TLS at its proxy and forwards this header; it also
+    # already redirects HTTP->HTTPS at the edge, so we don't set
+    # SECURE_SSL_REDIRECT (that can break Render's internal health checks).
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-    SECURE_SSL_REDIRECT = True
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_HSTS_SECONDS = 31536000          # 1 year
