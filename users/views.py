@@ -87,6 +87,11 @@ def send_otp(request):
         OTPVerification.objects.filter(email=email).delete()
         OTPVerification.objects.create(email=email, otp=otp)
 
+
+        import os
+        if os.environ.get('DEBUG') == 'True':
+            print(f"=== LOCAL OTP FOR {email}: {otp} ===")       
+
         # Send email in background thread so it doesn't block
         thread = threading.Thread(
             target=send_otp_email,
@@ -206,6 +211,7 @@ def get_user(request, user_id):
                 "longitude": user.longitude,
                 "linkedin_url": user.linkedin_url,
                 "github_url": user.github_url,
+                "instagram_url": user.instagram_url,
                 "created_at": user.created_at,
             })
         except User.DoesNotExist:
@@ -231,6 +237,7 @@ def edit_user(request, user_id):
         category_id = request.POST.get("category_id", "").strip()
         linkedin_url = request.POST.get("linkedin_url", "").strip()
         github_url = request.POST.get("github_url", "").strip()
+        instagram_url = request.POST.get("instagram_url", "").strip()
 
         if username:
             user.username = username
@@ -246,6 +253,8 @@ def edit_user(request, user_id):
             user.linkedin_url = linkedin_url
         if github_url:
             user.github_url = github_url
+        if instagram_url:
+            user.instagram_url = instagram_url
         if category_id:
             try:
                 user.category = Category.objects.get(id=category_id)

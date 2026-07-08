@@ -175,7 +175,8 @@ def search_feed(request):
                     Q(title__icontains=word) |
                     Q(description__icontains=word) |
                     Q(tags__name__icontains=word) |
-                    Q(skills__name__icontains=word)
+                    Q(skills__name__icontains=word) |
+                    Q(user__username__icontains=word)
                 )
             items = items.filter(query).distinct()
 

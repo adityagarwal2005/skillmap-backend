@@ -22,6 +22,7 @@ class User(models.Model):
     rating = models.FloatField(default=0.0)
     linkedin_url = models.URLField(null=True, blank=True)
     github_url = models.URLField(null=True, blank=True)
+    instagram_url = models.URLField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='not_available')
     created_at = models.DateTimeField(auto_now_add=True, null=True)
 
