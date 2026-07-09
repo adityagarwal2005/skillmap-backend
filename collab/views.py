@@ -3,7 +3,6 @@ from .models import CollabPost, CollabRequest
 from users.models import User
 from skills.models import Skill
 from users.views import get_user_from_token
-from work.views import get_distance_km  # haversine helper (was used but never imported)
 
 
 def get_user_from_request(request):
@@ -79,12 +78,11 @@ def create_collab_post(request):
 
 
 def show_collab_posts(request):
-    # Get filter params
+    # Get filter params. NOTE: collab posts are NOT geo-tagged (CollabPost has
+    # no latitude/longitude), so radius/location params are accepted but ignored
+    # — collab is matched by skill/type, not distance.
     skill_filter = request.GET.get('skill', '').strip().lower()
     collab_type  = request.GET.get('type', '').strip()
-    radius_km    = float(request.GET.get('radius', 50))
-    latitude     = request.GET.get('latitude')
-    longitude    = request.GET.get('longitude')
 
     posts = CollabPost.objects.filter(status='open')
 
@@ -98,15 +96,6 @@ def show_collab_posts(request):
         if skill_filter:
             skills = [s.name.lower() for s in post.skills_needed.all()]
             if not any(skill_filter in s for s in skills):
-                continue
-
-        # Location filter
-        if latitude and longitude and post.latitude and post.longitude:
-            distance = get_distance_km(
-                float(latitude), float(longitude),
-                post.latitude, post.longitude
-            )
-            if distance > radius_km:
                 continue
 
         results.append({
