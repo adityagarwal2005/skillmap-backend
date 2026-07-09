@@ -180,6 +180,10 @@ def apply_to_collab(request, post_id):
                 message=message if message else None,
             )
 
+            from notifications.utils import notify
+            notify(post.user, 'proposal',
+                   f"{user.username} applied to your collab \"{post.title}\"", actor=user)
+
             return JsonResponse({
                 "message": "Application sent",
                 "request_id": collab_request.id,
@@ -243,6 +247,11 @@ def respond_to_collab_request(request, request_id):
 
             collab_request.status = status
             collab_request.save()
+
+            from notifications.utils import notify
+            ntype = 'proposal_accepted' if status == 'accepted' else 'proposal_declined'
+            notify(collab_request.applicant, ntype,
+                   f"{user.username} {status} your collab application", actor=user)
 
             # if accepted, create a conversation
             if status == 'accepted':

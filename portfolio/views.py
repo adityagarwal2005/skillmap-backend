@@ -312,6 +312,9 @@ def react_to_item(request, item_id):
                     user=user,
                     reaction_type=reaction_type
                 )
+                from notifications.utils import notify
+                notify(item.user, 'reaction',
+                       f"{user.username} reacted to \"{item.title}\"", actor=user)
                 return JsonResponse({"message": f"Reacted with {reaction_type}"})
 
         except PortfolioItem.DoesNotExist:
@@ -333,6 +336,9 @@ def add_comment(request, item_id):
                 return JsonResponse({"error": "Comment text is required"}, status=400)
 
             comment = Comment.objects.create(portfolio_item=item, user=user, text=text)
+            from notifications.utils import notify
+            notify(item.user, 'comment',
+                   f"{user.username} commented on \"{item.title}\"", actor=user)
             return JsonResponse({"message": "Comment added", "comment_id": comment.id}, status=201)
         except PortfolioItem.DoesNotExist:
             return JsonResponse({"error": "Item not found"}, status=404)

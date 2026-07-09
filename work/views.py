@@ -344,6 +344,9 @@ def send_work_proposal(request, receiver_id):
             if not created:
                 return JsonResponse({"error": "You already sent a proposal to this user"}, status=400)
 
+            from notifications.utils import notify
+            notify(receiver, 'proposal', f"{user.username} sent you a work proposal", actor=user)
+
             return JsonResponse({"message": "Work proposal sent", "proposal_id": proposal.id}, status=201)
 
         except User.DoesNotExist:
@@ -370,6 +373,11 @@ def respond_to_work_proposal(request, proposal_id):
 
             proposal.status = status
             proposal.save()
+
+            from notifications.utils import notify
+            ntype = 'proposal_accepted' if status == 'accepted' else 'proposal_declined'
+            notify(proposal.sender, ntype,
+                   f"{user.username} {status} your work proposal", actor=user)
 
             if status == 'accepted':
                 conversation = Conversation.objects.create(conversation_type='work')
@@ -436,6 +444,10 @@ def send_message(request, conversation_id):
                 return JsonResponse({"error": "Message text is required"}, status=400)
 
             message = Message.objects.create(conversation=conversation, sender=user, text=text)
+
+            from notifications.utils import notify
+            notify(other, 'message', f"{user.username} sent you a message", actor=user)
+
             return JsonResponse({
                 "message": "Message sent",
                 "message_id": message.id,

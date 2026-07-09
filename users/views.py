@@ -394,6 +394,8 @@ def get_user(request, user_id):
                 "github_url": user.github_url,
                 "instagram_url": user.instagram_url,
                 "dob": user.dob,
+                "headline": user.headline,
+                "bio": user.bio,
                 "profile_image": request.build_absolute_uri(user.profile_image.url) if user.profile_image else None,
                 "created_at": user.created_at,
             })
@@ -441,6 +443,13 @@ def edit_user(request, user_id):
             user.instagram_url = instagram_url
         if dob:
             user.dob = dob
+        # headline/bio: set whenever the field is present (allows clearing them)
+        headline = request.POST.get("headline", None)
+        if headline is not None:
+            user.headline = headline.strip()[:120]
+        bio = request.POST.get("bio", None)
+        if bio is not None:
+            user.bio = bio.strip()
         profile_image = request.FILES.get("profile_image")
         if profile_image:
             user.profile_image = profile_image
@@ -547,6 +556,7 @@ def search_users(request):
                 'id':       u.id,
                 'username': u.username,
                 'category': u.category.name if u.category else None,
+                'headline': u.headline,
                 'profile_image': request.build_absolute_uri(u.profile_image.url) if u.profile_image else None,
                 'skills':   [s.name for s in u.skills.all()],
                 'rating':   u.rating,
@@ -598,6 +608,7 @@ def discover_users(request):
         'id': u.id,
         'username': u.username,
         'category': u.category.name if u.category else None,
+        'headline': u.headline,
         'profile_image': request.build_absolute_uri(u.profile_image.url) if u.profile_image else None,
         'skills': [s.name for s in u.skills.all()][:4],
         'status': u.status,
