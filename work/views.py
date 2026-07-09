@@ -122,7 +122,8 @@ def get_available_work_requests(request, user_id):
     latitude     = request.GET.get('latitude')
     longitude    = request.GET.get('longitude')
 
-    work_requests = WorkRequest.objects.filter(status='open')
+    # Newest first — this is a live job board.
+    work_requests = WorkRequest.objects.filter(status='open').order_by('-created_at')
 
     results = []
     for wr in work_requests:
@@ -151,6 +152,7 @@ def get_available_work_requests(request, user_id):
             'created_by':       wr.created_by.username,
             'skills':           [s.name for s in wr.required_skills.all()],
             'expires_at':       str(wr.expires_at) if wr.expires_at else None,
+            'created_at':       str(wr.created_at) if wr.created_at else None,
             'responses_count':  wr.responses.count(),
         })
 
