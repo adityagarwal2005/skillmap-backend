@@ -3,6 +3,7 @@ from .models import CollabPost, CollabRequest
 from users.models import User
 from skills.models import Skill
 from users.views import get_user_from_token
+from work.views import get_distance_km  # haversine helper (was used but never imported)
 
 
 def get_user_from_request(request):
