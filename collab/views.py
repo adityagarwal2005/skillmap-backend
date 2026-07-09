@@ -40,15 +40,11 @@ def create_collab_post(request):
         if collab_type not in valid_types:
             return JsonResponse({"error": "collab_type must be equity, experience or paid"}, status=400)
         
-        latitude = request.POST.get("latitude", "").strip()
-        longitude = request.POST.get("longitude", "").strip()
         post = CollabPost.objects.create(
             user=user,
             title=title,
             description=description,
             collab_type=collab_type,
-            latitude = request.POST.get("latitude", "").strip(),
-            longitude = request.POST.get("longitude", "").strip(),
         )
 
         if skills_input:
