@@ -26,6 +26,7 @@ class User(models.Model):
     dob = models.DateField(null=True, blank=True)
     headline = models.CharField(max_length=120, blank=True, default='')
     bio = models.TextField(blank=True, default='')
+    profile_views = models.PositiveIntegerField(default=0)
     profile_image = models.ImageField(upload_to='avatars/', null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='not_available')
     created_at = models.DateTimeField(auto_now_add=True, null=True)
@@ -75,6 +76,20 @@ class Block(models.Model):
 
     def __str__(self):
         return f"{self.blocker.username} blocked {self.blocked.username}"
+
+
+class SkillEndorsement(models.Model):
+    """One peer endorsing one of a user's skills (by name)."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='endorsements_received')
+    endorser = models.ForeignKey(User, on_delete=models.CASCADE, related_name='endorsements_given')
+    skill = models.CharField(max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'endorser', 'skill')
+
+    def __str__(self):
+        return f"{self.endorser.username} → {self.user.username} ({self.skill})"
 
 
 class Report(models.Model):

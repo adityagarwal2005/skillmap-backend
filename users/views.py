@@ -3,7 +3,7 @@ from django.contrib.auth.hashers import make_password, check_password
 from django.core.mail import send_mail
 from rest_framework_simplejwt.tokens import RefreshToken
 from smtplib import SMTPException
-from .models import User, StudentProfile, OTPVerification, Block, Report
+from .models import User, StudentProfile, OTPVerification, Block, Report, SkillEndorsement
 from skills.models import Category, Skill
 import math
 import random
@@ -378,16 +378,44 @@ def refresh_token(request):
 
 def get_user(request, user_id):
     if request.method == "GET":
+        from django.db.models import F, Count
         try:
             user = User.objects.get(id=user_id)
+
+            # Count a profile view when a *different* logged-in user opens it.
+            viewer, _ = get_user_from_token(request)
+            if viewer and viewer.id != user.id:
+                User.objects.filter(id=user.id).update(profile_views=F('profile_views') + 1)
+                user.profile_views += 1
+
+            # Endorsement counts per skill + whether the viewer endorsed each.
+            counts = {
+                row['skill']: row['n']
+                for row in SkillEndorsement.objects.filter(user=user)
+                .values('skill').annotate(n=Count('id'))
+            }
+            my_endorsements = set()
+            if viewer and viewer.id != user.id:
+                my_endorsements = set(
+                    SkillEndorsement.objects.filter(user=user, endorser=viewer)
+                    .values_list('skill', flat=True)
+                )
+            skills = [{
+                'name': s.name,
+                'endorsements': counts.get(s.name, 0),
+                'endorsed_by_me': s.name in my_endorsements,
+            } for s in user.skills.all()]
+
             return JsonResponse({
                 "id": user.id,
                 "username": user.username,
                 "email": user.email,
                 "category": user.category.name if user.category else None,
-                "skills": [s.name for s in user.skills.all()],
+                "skills": [s['name'] for s in skills],       # back-compat: list of names
+                "skills_detail": skills,                      # names + endorsement counts
                 "status": user.status,
                 "rating": user.rating,
+                "profile_views": user.profile_views,
                 "latitude": user.latitude,
                 "longitude": user.longitude,
                 "linkedin_url": user.linkedin_url,
@@ -403,6 +431,42 @@ def get_user(request, user_id):
             return JsonResponse({"error": "User not found"}, status=404)
 
     return JsonResponse({"error": "Method not allowed"}, status=405)
+
+
+def endorse_skill(request, user_id):
+    """Toggle the current user's endorsement of one of `user_id`'s skills."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    endorser, error = get_user_from_token(request)
+    if error:
+        return error
+    if endorser.id == user_id:
+        return JsonResponse({"error": "You can't endorse your own skills"}, status=400)
+
+    try:
+        target = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return JsonResponse({"error": "User not found"}, status=404)
+
+    skill = request.POST.get("skill", "").strip()
+    if not skill:
+        return JsonResponse({"error": "Skill is required"}, status=400)
+
+    existing = SkillEndorsement.objects.filter(user=target, endorser=endorser, skill=skill).first()
+    if existing:
+        existing.delete()
+        endorsed = False
+    else:
+        SkillEndorsement.objects.create(user=target, endorser=endorser, skill=skill)
+        endorsed = True
+
+    from notifications.utils import notify
+    if endorsed:
+        notify(target, 'reaction', f"{endorser.username} endorsed your {skill} skill", actor=endorser)
+
+    count = SkillEndorsement.objects.filter(user=target, skill=skill).count()
+    return JsonResponse({"endorsed": endorsed, "count": count})
 
 
 def edit_user(request, user_id):
