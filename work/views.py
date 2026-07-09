@@ -4,7 +4,7 @@ from datetime import timedelta
 from .models import WorkRequest, WorkRequestResponse, WorkProposal, Conversation, Message
 from users.models import User
 from skills.models import Skill, Category
-from users.views import get_user_from_token
+from users.views import get_user_from_token, require_contact
 
 
 def get_distance_km(lat1, lon1, lat2, lon2):
@@ -46,6 +46,10 @@ def create_work_request(request):
         user, error = get_user_from_request(request)
         if error:
             return error
+
+        guard = require_contact(user)
+        if guard:
+            return guard
 
         description = request.POST.get("description", "").strip()
         payment_amount = request.POST.get("payment_amount", "").strip()
@@ -232,6 +236,10 @@ def assign_work_request(request, work_request_id):
         if error:
             return error
 
+        guard = require_contact(user)
+        if guard:
+            return guard
+
         assignee_id = request.POST.get("assignee_id", "").strip()
         if not assignee_id:
             return JsonResponse({"error": "assignee_id is required"}, status=400)
@@ -314,6 +322,10 @@ def send_work_proposal(request, receiver_id):
         if error:
             return error
 
+        guard = require_contact(user)
+        if guard:
+            return guard
+
         try:
             receiver = User.objects.get(id=receiver_id)
 
@@ -366,6 +378,11 @@ def respond_to_work_proposal(request, proposal_id):
         status = request.POST.get("status", "").strip().lower()
         if status not in ["accepted", "declined"]:
             return JsonResponse({"error": "status must be 'accepted' or 'declined'"}, status=400)
+
+        if status == 'accepted':
+            guard = require_contact(user)
+            if guard:
+                return guard
 
         try:
             proposal = WorkProposal.objects.get(id=proposal_id, receiver=user)

@@ -23,6 +23,7 @@ class User(models.Model):
     linkedin_url = models.URLField(null=True, blank=True)
     github_url = models.URLField(null=True, blank=True)
     instagram_url = models.URLField(null=True, blank=True)
+    whatsapp = models.CharField(max_length=20, blank=True, default='')
     dob = models.DateField(null=True, blank=True)
     headline = models.CharField(max_length=120, blank=True, default='')
     bio = models.TextField(blank=True, default='')

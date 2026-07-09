@@ -2,7 +2,7 @@ from django.http import JsonResponse
 from .models import CollabPost, CollabRequest
 from users.models import User
 from skills.models import Skill
-from users.views import get_user_from_token
+from users.views import get_user_from_token, require_contact
 from work.views import get_distance_km
 
 
@@ -28,6 +28,10 @@ def create_collab_post(request):
         user, error = get_user_from_request(request)
         if error:
             return error
+
+        guard = require_contact(user)
+        if guard:
+            return guard
 
         title = request.POST.get("title", "").strip()
         description = request.POST.get("description", "").strip()
@@ -161,6 +165,10 @@ def apply_to_collab(request, post_id):
         if error:
             return error
 
+        guard = require_contact(user)
+        if guard:
+            return guard
+
         try:
             post = CollabPost.objects.get(id=post_id)
 
@@ -239,6 +247,11 @@ def respond_to_collab_request(request, request_id):
         status = request.POST.get("status", "").strip().lower()
         if status not in ["accepted", "declined"]:
             return JsonResponse({"error": "status must be accepted or declined"}, status=400)
+
+        if status == 'accepted':
+            guard = require_contact(user)
+            if guard:
+                return guard
 
         try:
             collab_request = CollabRequest.objects.get(

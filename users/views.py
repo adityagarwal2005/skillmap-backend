@@ -51,6 +51,26 @@ def get_user_from_token(request):
         return None, JsonResponse({"error": "Invalid or expired token"}, status=401)
 
 
+def has_contact(user):
+    """True if the user has attached at least one identity/contact link so
+    others can verify who they are: LinkedIn, Instagram, or WhatsApp."""
+    return bool(
+        (user.linkedin_url or '').strip()
+        or (user.instagram_url or '').strip()
+        or (getattr(user, 'whatsapp', '') or '').strip()
+    )
+
+
+def require_contact(user):
+    """Return a 403 JsonResponse if the user hasn't attached a contact yet,
+    else None. Gate work/collab posting + accepting behind this."""
+    if not has_contact(user):
+        return JsonResponse({
+            "error": "Add a LinkedIn, Instagram, or WhatsApp to your profile first "
+                     "so people can verify who they're working with.",
+            "code": "contact_required",
+        }, status=403)
+    return None
 
 
 def block_user(request, user_id):
@@ -431,6 +451,7 @@ def get_user(request, user_id):
                 "linkedin_url": user.linkedin_url,
                 "github_url": user.github_url,
                 "instagram_url": user.instagram_url,
+                "whatsapp": user.whatsapp,
                 "dob": user.dob,
                 "headline": user.headline,
                 "bio": user.bio,
@@ -517,6 +538,9 @@ def edit_user(request, user_id):
             user.instagram_url = instagram_url
         if dob:
             user.dob = dob
+        whatsapp = request.POST.get("whatsapp", None)
+        if whatsapp is not None:
+            user.whatsapp = whatsapp.strip()[:20]
         # headline/bio: set whenever the field is present (allows clearing them)
         headline = request.POST.get("headline", None)
         if headline is not None:
