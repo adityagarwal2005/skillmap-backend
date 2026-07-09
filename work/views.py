@@ -494,6 +494,44 @@ def get_messages(request, conversation_id):
     return JsonResponse({"error": "Method not allowed"}, status=405)
 
 
+def start_conversation(request, user_id):
+    """Get-or-create a 1:1 direct conversation with another user, so anyone can
+    message anyone (not only after a proposal/collab is accepted)."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    user, error = get_user_from_request(request)
+    if error:
+        return error
+
+    if user.id == user_id:
+        return JsonResponse({"error": "You can't message yourself"}, status=400)
+
+    try:
+        other = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return JsonResponse({"error": "User not found"}, status=404)
+
+    from users.models import Block
+    from django.db.models import Q
+    if Block.objects.filter(
+        Q(blocker=user, blocked=other) | Q(blocker=other, blocked=user)
+    ).exists():
+        return JsonResponse({"error": "You can't message this user"}, status=403)
+
+    # Reuse an existing 1:1 conversation if one already exists between the two.
+    convo = None
+    for c in Conversation.objects.filter(participants=user).filter(participants=other):
+        if c.participants.count() == 2:
+            convo = c
+            break
+    if convo is None:
+        convo = Conversation.objects.create(conversation_type='direct')
+        convo.participants.add(user, other)
+
+    return JsonResponse({"conversation_id": convo.id})
+
+
 def get_my_conversations(request):
     if request.method == "GET":
         user, error = get_user_from_request(request)
