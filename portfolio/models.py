@@ -12,6 +12,7 @@ class PortfolioItem(models.Model):
         ('baked_good', 'Baked Good'),
         ('artwork', 'Artwork'),
         ('video', 'Video'),
+        ('status', 'Status'),
         ('other', 'Other'),
     ]
 

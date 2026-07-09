@@ -3,6 +3,7 @@ from .models import CollabPost, CollabRequest
 from users.models import User
 from skills.models import Skill
 from users.views import get_user_from_token
+from work.views import get_distance_km
 
 
 def get_user_from_request(request):
@@ -40,11 +41,15 @@ def create_collab_post(request):
         if collab_type not in valid_types:
             return JsonResponse({"error": "collab_type must be equity, experience or paid"}, status=400)
         
+        latitude = request.POST.get("latitude", "").strip()
+        longitude = request.POST.get("longitude", "").strip()
         post = CollabPost.objects.create(
             user=user,
             title=title,
             description=description,
             collab_type=collab_type,
+            latitude=float(latitude) if latitude else None,
+            longitude=float(longitude) if longitude else None,
         )
 
         if skills_input:
@@ -74,11 +79,11 @@ def create_collab_post(request):
 
 
 def show_collab_posts(request):
-    # Get filter params. NOTE: collab posts are NOT geo-tagged (CollabPost has
-    # no latitude/longitude), so radius/location params are accepted but ignored
-    # — collab is matched by skill/type, not distance.
     skill_filter = request.GET.get('skill', '').strip().lower()
     collab_type  = request.GET.get('type', '').strip()
+    radius_km    = float(request.GET.get('radius', 50))
+    latitude     = request.GET.get('latitude')
+    longitude    = request.GET.get('longitude')
 
     posts = CollabPost.objects.filter(status='open')
 
@@ -94,6 +99,15 @@ def show_collab_posts(request):
             if not any(skill_filter in s for s in skills):
                 continue
 
+        # Location filter — only when both the searcher and the post have a
+        # location. Posts without a location always show (don't hide them).
+        dist_display = None
+        if latitude and longitude and post.latitude is not None and post.longitude is not None:
+            distance = get_distance_km(float(latitude), float(longitude), post.latitude, post.longitude)
+            if distance > radius_km:
+                continue
+            dist_display = round(distance, 1)
+
         results.append({
             'id':           post.id,
             'title':        post.title,
@@ -103,6 +117,7 @@ def show_collab_posts(request):
             'posted_by':    post.user.username,
             'skills_needed':[s.name for s in post.skills_needed.all()],
             'applicants':   post.requests.count() if hasattr(post, 'requests') else 0,
+            'distance_km':  dist_display,
         })
 
     total = len(results)

@@ -78,6 +78,7 @@ urlpatterns = [
     # Portfolio
     path("portfolio/", csrf_exempt(portfolio_views.show_portfolio_items)),
     path("portfolio/create/", csrf_exempt(portfolio_views.create_portfolio_item)),
+    path("portfolio/status/", csrf_exempt(portfolio_views.create_status_post)),
     path("portfolio/user/<int:user_id>/", csrf_exempt(portfolio_views.show_user_portfolio)),
     path("portfolio/<int:item_id>/comments/", csrf_exempt(portfolio_views.show_item_comments)),
     path("portfolio/<int:item_id>/react/", csrf_exempt(portfolio_views.react_to_item)),

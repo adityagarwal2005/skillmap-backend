@@ -79,6 +79,29 @@ def create_portfolio_item(request):
     return JsonResponse({"error": "Method not allowed"}, status=405)
 
 
+def create_status_post(request):
+    """A quick text update for the feed (no media, no project fields).
+    Stored as a PortfolioItem of type 'status' so it flows through the feed."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    user, error = get_user_from_request(request)
+    if error:
+        return error
+
+    text = request.POST.get("text", "").strip()
+    if not text:
+        return JsonResponse({"error": "Say something first"}, status=400)
+
+    item = PortfolioItem.objects.create(
+        user=user,
+        title=text[:100],
+        description=text[:200],
+        portfolio_type='status',
+    )
+    return JsonResponse({"message": "Posted", "item_id": item.id}, status=201)
+
+
 def show_portfolio_items(request):
     """Show all portfolio items — public feed"""
     if request.method == "GET":
@@ -129,7 +152,11 @@ def show_user_portfolio(request, user_id):
             tags_filter = request.GET.get("tags", "").strip()
             type_filter = request.GET.get("type", "").strip()
 
-            items = PortfolioItem.objects.filter(user=user).prefetch_related(
+            # Exclude quick status updates from the portfolio/Work grid — they
+            # live in the feed, not on the profile as "work".
+            items = PortfolioItem.objects.filter(user=user).exclude(
+                portfolio_type='status'
+            ).prefetch_related(
                 "skills", "tags", "media", "reactions", "comments"
             ).order_by("-created_at")
 

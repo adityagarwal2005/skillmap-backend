@@ -376,6 +376,15 @@ def refresh_token(request):
     return JsonResponse({"error": "Method not allowed"}, status=405)
 
 
+def _safe_review_count(user):
+    """Never let a missing reviews table break profile loading."""
+    try:
+        from reviews.models import Review
+        return Review.objects.filter(reviewee=user).count()
+    except Exception:
+        return 0
+
+
 def get_user(request, user_id):
     if request.method == "GET":
         from django.db.models import F, Count
@@ -415,6 +424,7 @@ def get_user(request, user_id):
                 "skills_detail": skills,                      # names + endorsement counts
                 "status": user.status,
                 "rating": user.rating,
+                "review_count": _safe_review_count(user),
                 "profile_views": user.profile_views,
                 "latitude": user.latitude,
                 "longitude": user.longitude,

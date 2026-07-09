@@ -21,6 +21,8 @@ class CollabPost(models.Model):
     skills_needed = models.ManyToManyField(Skill, related_name='collab_posts', blank=True)
     collab_type = models.CharField(max_length=15, choices=COLLAB_TYPE_CHOICES, default='experience')
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='open')
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, null=True)
 
     def __str__(self):
