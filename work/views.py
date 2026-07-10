@@ -476,17 +476,30 @@ def send_message(request, conversation_id):
                 return JsonResponse({"error": "You can't message this user"}, status=403)
 
             text = request.POST.get("text", "").strip()
-            if not text:
-                return JsonResponse({"error": "Message text is required"}, status=400)
+            media_file = request.FILES.get("media")
+            if not text and not media_file:
+                return JsonResponse({"error": "Send some text or an attachment"}, status=400)
 
-            message = Message.objects.create(conversation=conversation, sender=user, text=text)
+            media_type = ''
+            if media_file:
+                ctype = (getattr(media_file, 'content_type', '') or '').lower()
+                media_type = 'video' if ctype.startswith('video') else 'image'
+
+            message = Message.objects.create(
+                conversation=conversation, sender=user, text=text,
+                media=media_file if media_file else None,
+                media_type=media_type,
+            )
 
             from notifications.utils import notify
-            notify(other, 'message', f"{user.username} sent you a message", actor=user)
+            preview = text or ('sent a video' if media_type == 'video' else 'sent a photo')
+            notify(other, 'message', f"{user.username}: {preview[:40]}", actor=user)
 
             return JsonResponse({
                 "message": "Message sent",
                 "message_id": message.id,
+                "media_url": request.build_absolute_uri(message.media.url) if message.media else None,
+                "media_type": message.media_type,
                 "created_at": str(message.created_at),
             }, status=201)
 
@@ -518,6 +531,8 @@ def get_messages(request, conversation_id):
                     "sender": m.sender.username,
                     "sender_avatar": request.build_absolute_uri(m.sender.profile_image.url) if m.sender.profile_image else None,
                     "text": m.text,
+                    "media_url": request.build_absolute_uri(m.media.url) if m.media else None,
+                    "media_type": m.media_type or None,
                     "created_at": str(m.created_at),
                 }
                 for m in messages

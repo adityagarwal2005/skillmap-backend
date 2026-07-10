@@ -86,9 +86,13 @@ class Conversation(models.Model):
 
 
 class Message(models.Model):
+    MEDIA_TYPE_CHOICES = [('image', 'Image'), ('video', 'Video')]
+
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name='messages')
     sender = models.ForeignKey(User, on_delete=models.CASCADE)
-    text = models.TextField()
+    text = models.TextField(blank=True, default='')
+    media = models.FileField(upload_to='messages/', null=True, blank=True)
+    media_type = models.CharField(max_length=10, choices=MEDIA_TYPE_CHOICES, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True, null=True)
 
     def __str__(self):
