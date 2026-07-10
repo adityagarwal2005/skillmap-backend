@@ -556,15 +556,32 @@ def start_conversation(request, user_id):
         return JsonResponse({"error": "You can't message this user"}, status=403)
 
     # Reuse an existing 1:1 conversation if one already exists between the two.
-    convo = None
     for c in Conversation.objects.filter(participants=user).filter(participants=other):
         if c.participants.count() == 2:
-            convo = c
-            break
-    if convo is None:
-        convo = Conversation.objects.create(conversation_type='direct')
-        convo.participants.add(user, other)
+            return JsonResponse({"conversation_id": c.id})
 
+    # No conversation yet — messaging is only allowed between people who have
+    # actually worked together: an accepted freelance job or collab.
+    from collab.models import CollabRequest
+    connected = (
+        WorkRequest.objects.filter(
+            Q(created_by=user, assigned_to=other) | Q(created_by=other, assigned_to=user)
+        ).exists()
+        or WorkProposal.objects.filter(
+            Q(sender=user, receiver=other) | Q(sender=other, receiver=user), status='accepted'
+        ).exists()
+        or CollabRequest.objects.filter(
+            Q(applicant=user, collab_post__user=other) | Q(applicant=other, collab_post__user=user),
+            status='accepted'
+        ).exists()
+    )
+    if not connected:
+        return JsonResponse({
+            "error": "You can only message people you've worked with — apply to their collab or freelance job (or accept theirs) first."
+        }, status=403)
+
+    convo = Conversation.objects.create(conversation_type='direct')
+    convo.participants.add(user, other)
     return JsonResponse({"conversation_id": convo.id})
 
 
