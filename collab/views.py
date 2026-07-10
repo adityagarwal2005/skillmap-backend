@@ -103,14 +103,19 @@ def show_collab_posts(request):
             if not any(skill_filter in s for s in skills):
                 continue
 
-        # Location filter — only when both the searcher and the post have a
-        # location. Posts without a location always show (don't hide them).
+        # Honest radius filtering: if the searcher shared a location, only show
+        # posts with a known location within the radius. Posts with no location
+        # can't be verified as "nearby", so they're excluded from a location
+        # search (rather than falsely shown as within range).
         dist_display = None
-        if latitude and longitude and post.latitude is not None and post.longitude is not None:
-            distance = get_distance_km(float(latitude), float(longitude), post.latitude, post.longitude)
-            if distance > radius_km:
+        if latitude and longitude:
+            if post.latitude is not None and post.longitude is not None:
+                distance = get_distance_km(float(latitude), float(longitude), post.latitude, post.longitude)
+                if distance > radius_km:
+                    continue
+                dist_display = round(distance, 1)
+            else:
                 continue
-            dist_display = round(distance, 1)
 
         results.append({
             'id':           post.id,

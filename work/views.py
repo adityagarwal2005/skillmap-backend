@@ -139,12 +139,22 @@ def get_available_work_requests(request, user_id):
             if not any(skill_filter in s for s in skills):
                 continue
 
-        if latitude and longitude and wr.created_by.latitude and wr.created_by.longitude:
-            distance = get_distance_km(
-                float(latitude), float(longitude),
-                wr.created_by.latitude, wr.created_by.longitude
-            )
-            if distance > radius_km:
+        # Honest radius filtering: if the searcher shared a location, only show
+        # jobs whose poster has a known location within the radius. Jobs from
+        # posters with no location can't be verified as "nearby", so they're
+        # excluded from a location search (rather than falsely shown).
+        dist_display = None
+        poster = wr.created_by
+        if latitude and longitude:
+            if poster.latitude is not None and poster.longitude is not None:
+                distance = get_distance_km(
+                    float(latitude), float(longitude),
+                    poster.latitude, poster.longitude
+                )
+                if distance > radius_km:
+                    continue
+                dist_display = round(distance, 1)
+            else:
                 continue
 
         results.append({
@@ -157,6 +167,7 @@ def get_available_work_requests(request, user_id):
             'skills':           [s.name for s in wr.required_skills.all()],
             'expires_at':       str(wr.expires_at) if wr.expires_at else None,
             'created_at':       str(wr.created_at) if wr.created_at else None,
+            'distance_km':      dist_display,
             'responses_count':  wr.responses.count(),
         })
 
