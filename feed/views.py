@@ -271,10 +271,12 @@ def trending_feed(request):
     entries = []  # (distance_or_None, popularity, created_at, kind, obj)
 
     for wr in WorkRequest.objects.filter(status='open').exclude(created_by=user).exclude(created_by_id__in=blocked):
-        u = wr.created_by
+        # Prefer the job's own (live) location, fall back to the poster's profile.
+        j_lat = wr.latitude if wr.latitude is not None else wr.created_by.latitude
+        j_lon = wr.longitude if wr.longitude is not None else wr.created_by.longitude
         dist = None
-        if has_loc and u.latitude is not None and u.longitude is not None:
-            dist = round(get_distance_km(user.latitude, user.longitude, u.latitude, u.longitude), 1)
+        if has_loc and j_lat is not None and j_lon is not None:
+            dist = round(get_distance_km(user.latitude, user.longitude, j_lat, j_lon), 1)
         entries.append((dist, wr.responses.count(), wr.created_at, 'j', wr))
 
     for cp in CollabPost.objects.filter(status='open').exclude(user=user).exclude(user_id__in=blocked):

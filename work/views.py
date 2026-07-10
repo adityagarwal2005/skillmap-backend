@@ -70,6 +70,8 @@ def create_work_request(request):
         except ValueError:
             return JsonResponse({"error": "time_limit_hours must be a number"}, status=400)
 
+        latitude = request.POST.get("latitude", "").strip()
+        longitude = request.POST.get("longitude", "").strip()
         work_request = WorkRequest.objects.create(
             created_by=user,
             description=description,
@@ -77,6 +79,8 @@ def create_work_request(request):
             time_limit_hours=int(time_limit_hours),
             expires_at=expires_at,
             status='open',
+            latitude=float(latitude) if latitude else None,
+            longitude=float(longitude) if longitude else None,
         )
         work_request.required_skills.set(skill_objects)
 
@@ -139,17 +143,19 @@ def get_available_work_requests(request, user_id):
             if not any(skill_filter in s for s in skills):
                 continue
 
-        # Honest radius filtering: if the searcher shared a location, only show
-        # jobs whose poster has a known location within the radius. Jobs from
-        # posters with no location can't be verified as "nearby", so they're
-        # excluded from a location search (rather than falsely shown).
+        # Honest radius filtering. Use the job's OWN location (captured live when
+        # it was posted); for older jobs with no location, fall back to the
+        # poster's profile location. If neither is known, the job can't be
+        # verified as "nearby", so it's excluded from a location search rather
+        # than falsely shown.
         dist_display = None
-        poster = wr.created_by
+        job_lat = wr.latitude if wr.latitude is not None else wr.created_by.latitude
+        job_lon = wr.longitude if wr.longitude is not None else wr.created_by.longitude
         if latitude and longitude:
-            if poster.latitude is not None and poster.longitude is not None:
+            if job_lat is not None and job_lon is not None:
                 distance = get_distance_km(
                     float(latitude), float(longitude),
-                    poster.latitude, poster.longitude
+                    job_lat, job_lon
                 )
                 if distance > radius_km:
                     continue

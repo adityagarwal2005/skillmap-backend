@@ -17,6 +17,8 @@ class WorkRequest(models.Model):
     time_limit_hours = models.IntegerField()
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='open')
     assigned_to = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_work')
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     expires_at = models.DateTimeField(null=True, blank=True)
 
