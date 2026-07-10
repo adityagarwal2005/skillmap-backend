@@ -578,3 +578,58 @@ def get_my_conversations(request):
         return JsonResponse({"conversations": data, "count": len(data)})
 
     return JsonResponse({"error": "Method not allowed"}, status=405)
+
+def get_my_applications(request):
+    """Everything the logged-in user has applied to — freelance jobs and collab
+    posts — with a simple status so they can track outcomes."""
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    user, error = get_user_from_request(request)
+    if error:
+        return error
+
+    from collab.models import CollabRequest
+
+    apps = []
+
+    # Freelance: WorkRequestResponse.user == applicant
+    for r in WorkRequestResponse.objects.filter(user=user).select_related(
+        'work_request', 'work_request__created_by'
+    ):
+        wr = r.work_request
+        if wr.assigned_to_id == user.id:
+            status = 'accepted'
+        elif wr.status in ('assigned', 'closed'):
+            status = 'filled'      # someone else was picked
+        else:
+            status = 'pending'
+        apps.append({
+            'kind': 'freelance',
+            'id': wr.id,
+            'title': (wr.description or '').strip()[:70],
+            'status': status,
+            'applied_at': str(r.created_at) if r.created_at else None,
+            'posted_by': wr.created_by.username,
+            'posted_by_id': wr.created_by.id,
+            'payment_amount': wr.payment_amount,
+        })
+
+    # Collab: CollabRequest.applicant == user
+    for cr in CollabRequest.objects.filter(applicant=user).select_related(
+        'collab_post', 'collab_post__user'
+    ):
+        cp = cr.collab_post
+        apps.append({
+            'kind': 'collab',
+            'id': cp.id,
+            'title': cp.title,
+            'status': cr.status,   # pending / accepted / declined
+            'applied_at': str(cr.created_at) if cr.created_at else None,
+            'posted_by': cp.user.username,
+            'posted_by_id': cp.user.id,
+            'collab_type': cp.collab_type,
+        })
+
+    apps.sort(key=lambda a: a['applied_at'] or '', reverse=True)
+    return JsonResponse({'applications': apps, 'count': len(apps)})

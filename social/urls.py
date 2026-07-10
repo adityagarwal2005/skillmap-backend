@@ -109,6 +109,7 @@ urlpatterns = [
     path("work/proposals/mine/", csrf_exempt(work_views.get_my_proposals)),
 
     # Conversations & Messages
+    path("my-applications/", csrf_exempt(work_views.get_my_applications)),
     path("conversations/", csrf_exempt(work_views.get_my_conversations)),
     path("conversations/start/<int:user_id>/", csrf_exempt(work_views.start_conversation)),
     path("conversations/<int:conversation_id>/send/", csrf_exempt(work_views.send_message)),
