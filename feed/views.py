@@ -101,73 +101,91 @@ def apply_radius_filter(items, lat, lon, radius):
     return filtered
 
 
-def smart_feed(request):
-    result = get_user_from_token(request)
-    if isinstance(result, tuple):
-        user = result[0]
-    else:
-        user = result
+def _feed_user(u, request):
+    return {
+        'id': u.id,
+        'username': u.username,
+        'category': u.category.name if u.category else None,
+        'profile_image': request.build_absolute_uri(u.profile_image.url) if u.profile_image else None,
+    }
 
+
+def _job_item(wr, request, distance=None):
+    return {
+        'kind': 'freelance',
+        'id': wr.id,
+        'title': (wr.description or '').strip()[:70],
+        'description': wr.description,
+        'skills': [s.name for s in wr.required_skills.all()],
+        'created_at': str(wr.created_at) if wr.created_at else None,
+        'payment_amount': wr.payment_amount,
+        'time_limit_hours': wr.time_limit_hours,
+        'responses_count': wr.responses.count(),
+        'distance_km': distance,
+        'user': _feed_user(wr.created_by, request),
+    }
+
+
+def _collab_item(cp, request, distance=None):
+    return {
+        'kind': 'collab',
+        'id': cp.id,
+        'title': cp.title,
+        'description': cp.description,
+        'skills': [s.name for s in cp.skills_needed.all()],
+        'created_at': str(cp.created_at) if cp.created_at else None,
+        'collab_type': cp.collab_type,
+        'applicants': cp.requests.count() if hasattr(cp, 'requests') else 0,
+        'distance_km': distance,
+        'user': _feed_user(cp.user, request),
+    }
+
+
+def _ts(dt):
+    return dt.timestamp() if dt else 0
+
+
+def smart_feed(request):
+    """For You — open freelance jobs + collab posts, ranked by how well they
+    match the viewer's skills/category (falls back to most-recent)."""
+    result = get_user_from_token(request)
+    user = result[0] if isinstance(result, tuple) else result
     if not user:
         return JsonResponse({'error': 'Unauthorized'}, status=401)
 
-    user_skills = [s.name.lower() for s in user.skills.all()]
-    user_category = user.category
+    from work.models import WorkRequest
+    from collab.models import CollabPost
 
-    blocked_ids = Block.objects.filter(blocker=user).values_list('blocked_id', flat=True)
-    items = PortfolioItem.objects.exclude(user_id__in=blocked_ids).order_by('-created_at')
+    user_skills = {s.name.lower() for s in user.skills.all()}
+    cat_id = user.category_id
+    blocked = set(Block.objects.filter(blocker=user).values_list('blocked_id', flat=True))
 
-    results = []
-    for item in items:
-        item_skills = [s.name.lower() for s in item.skills.all()]
-        score = 0
+    scored = []  # (score, created_at, kind, obj)
 
-        if user_category and item.user.category == user_category:
+    for wr in WorkRequest.objects.filter(status='open').exclude(created_by=user).exclude(created_by_id__in=blocked):
+        sk = {s.name.lower() for s in wr.required_skills.all()}
+        score = 2 * len(user_skills & sk)
+        if cat_id and wr.created_by.category_id == cat_id:
             score += 3
-
-        for skill in user_skills:
-            if skill in item_skills:
-                score += 2
-
-        if not user_skills and not user_category:
+        if not user_skills and not cat_id:
             score = 1
+        scored.append((score, wr.created_at, 'j', wr))
 
-        if item.verified:
-            score += 1
+    for cp in CollabPost.objects.filter(status='open').exclude(user=user).exclude(user_id__in=blocked):
+        sk = {s.name.lower() for s in cp.skills_needed.all()}
+        score = 2 * len(user_skills & sk)
+        if cat_id and cp.user.category_id == cat_id:
+            score += 3
+        if not user_skills and not cat_id:
+            score = 1
+        scored.append((score, cp.created_at, 'c', cp))
 
-        results.append({'score': score, 'item': item})
-
-    results.sort(key=lambda x: (x['score'], x['item'].created_at.timestamp()), reverse=True)
+    scored.sort(key=lambda x: (x[0], _ts(x[1])), reverse=True)
 
     limit, offset = parse_pagination(request)
-    total = len(results)
-    page = results[offset:offset + limit]
-
-    feed = []
-    for r in page:
-        item = r['item']
-        reactions = Reaction.objects.filter(portfolio_item=item).count()
-        comments  = Comment.objects.filter(portfolio_item=item).count()
-        feed.append({
-            'id':             item.id,
-            'title':          item.title,
-            'description':    item.description,
-            'portfolio_type': item.portfolio_type,
-            'verified':       item.verified,
-            'created_at':     str(item.created_at),
-            'user': {
-                'id':       item.user.id,
-                'username': item.user.username,
-                'category': item.user.category.name if item.user.category else None,
-                'profile_image': request.build_absolute_uri(item.user.profile_image.url) if item.user.profile_image else None,
-            },
-            'skills':    [s.name for s in item.skills.all()],
-            'tags':      [t.name for t in item.tags.all()],
-            'media':     [{'id': m.id, 'url': m.url or (request.build_absolute_uri(m.file.url) if m.file else None), 'media_type': m.media_type} for m in item.media.all()],
-            'reactions': reactions,
-            'comments':  comments,
-        })
-
+    total = len(scored)
+    page = scored[offset:offset + limit]
+    feed = [_job_item(o, request) if k == 'j' else _collab_item(o, request) for (_, _, k, o) in page]
     return JsonResponse({'feed': feed, 'count': total, 'has_more': offset + limit < total})
 def search_feed(request):
     if request.method == "GET":
@@ -235,33 +253,48 @@ def search_feed(request):
 
     return JsonResponse({"error": "Method not allowed"}, status=405)
 def trending_feed(request):
-    if request.method == "GET":
-        user, error = get_user_from_token(request)
-        if error:
-            return error
+    """Trending — open freelance jobs + collab posts, nearest-first when we know
+    the viewer's location, otherwise by popularity (applicants) + recency."""
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
 
-        from django.utils import timezone
-        from datetime import timedelta
+    user, error = get_user_from_token(request)
+    if error:
+        return error
 
-        one_week_ago = timezone.now() - timedelta(days=7)
+    from work.models import WorkRequest
+    from collab.models import CollabPost
 
-        blocked_ids = Block.objects.filter(blocker=user).values_list('blocked_id', flat=True)
-        items = PortfolioItem.objects.select_related(
-            "user", "user__category"
-        ).prefetch_related(
-            "skills", "tags", "media", "reactions", "comments"
-        ).filter(created_at__gte=one_week_ago).exclude(user_id__in=blocked_ids)
+    blocked = set(Block.objects.filter(blocker=user).values_list('blocked_id', flat=True))
+    has_loc = user.latitude is not None and user.longitude is not None
 
-        if user.category:
-            items = items.filter(user__category=user.category)
+    entries = []  # (distance_or_None, popularity, created_at, kind, obj)
 
-        items = sorted(items, key=lambda x: x.reactions.count(), reverse=True)
+    for wr in WorkRequest.objects.filter(status='open').exclude(created_by=user).exclude(created_by_id__in=blocked):
+        u = wr.created_by
+        dist = None
+        if has_loc and u.latitude is not None and u.longitude is not None:
+            dist = round(get_distance_km(user.latitude, user.longitude, u.latitude, u.longitude), 1)
+        entries.append((dist, wr.responses.count(), wr.created_at, 'j', wr))
 
-        total = len(items)
-        limit, offset = parse_pagination(request)
-        page = items[offset:offset + limit]
+    for cp in CollabPost.objects.filter(status='open').exclude(user=user).exclude(user_id__in=blocked):
+        dist = None
+        if has_loc and cp.latitude is not None and cp.longitude is not None:
+            dist = round(get_distance_km(user.latitude, user.longitude, cp.latitude, cp.longitude), 1)
+        elif has_loc and cp.user.latitude is not None and cp.user.longitude is not None:
+            dist = round(get_distance_km(user.latitude, user.longitude, cp.user.latitude, cp.user.longitude), 1)
+        pop = cp.requests.count() if hasattr(cp, 'requests') else 0
+        entries.append((dist, pop, cp.created_at, 'c', cp))
 
-        data = [format_item(i, request) for i in page]
-        return JsonResponse({"trending": data, "count": total, "has_more": offset + limit < total})
+    if has_loc:
+        # nearest first (unknown-distance last), then most applicants, then newest
+        entries.sort(key=lambda e: (e[0] is None, e[0] if e[0] is not None else 0, -e[1], -_ts(e[2])))
+    else:
+        entries.sort(key=lambda e: (-e[1], -_ts(e[2])))
 
-    return JsonResponse({"error": "Method not allowed"}, status=405)
+    limit, offset = parse_pagination(request)
+    total = len(entries)
+    page = entries[offset:offset + limit]
+    trending = [_job_item(o, request, distance=d) if k == 'j' else _collab_item(o, request, distance=d)
+                for (d, _, _, k, o) in page]
+    return JsonResponse({"trending": trending, "count": total, "has_more": offset + limit < total})
