@@ -120,6 +120,9 @@ urlpatterns = [
     path("notifications/unread/", csrf_exempt(notification_views.get_unread_count)),
     path("notifications/read-all/", csrf_exempt(notification_views.mark_all_as_read)),
     path("notifications/<int:notification_id>/read/", csrf_exempt(notification_views.mark_as_read)),
+    path("push/vapid-key/", csrf_exempt(notification_views.get_vapid_key)),
+    path("push/subscribe/", csrf_exempt(notification_views.subscribe_push)),
+    path("push/unsubscribe/", csrf_exempt(notification_views.unsubscribe_push)),
 
     # Reviews
     path("reviews/user/<int:reviewee_id>/add/", csrf_exempt(review_views.add_review)),

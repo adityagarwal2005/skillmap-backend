@@ -93,6 +93,18 @@ class SkillEndorsement(models.Model):
         return f"{self.endorser.username} → {self.user.username} ({self.skill})"
 
 
+class PushSubscription(models.Model):
+    """A browser Web Push subscription so we can notify a user when the app is closed."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='push_subscriptions')
+    endpoint = models.TextField(unique=True)
+    p256dh = models.CharField(max_length=255)
+    auth = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"push: {self.user.username}"
+
+
 class Report(models.Model):
     REPORT_TYPE_CHOICES = [
         ('user', 'User'),
