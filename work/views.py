@@ -480,15 +480,31 @@ def send_message(request, conversation_id):
             if not text and not media_file:
                 return JsonResponse({"error": "Send some text or an attachment"}, status=400)
 
+            media_url = ''
             media_type = ''
             if media_file:
                 ctype = (getattr(media_file, 'content_type', '') or '').lower()
                 media_type = 'video' if ctype.startswith('video') else 'image'
+                try:
+                    import cloudinary, cloudinary.uploader
+                    from django.conf import settings
+                    cs = settings.CLOUDINARY_STORAGE
+                    cloudinary.config(
+                        cloud_name=cs.get('CLOUD_NAME'),
+                        api_key=cs.get('API_KEY'),
+                        api_secret=cs.get('API_SECRET'),
+                    )
+                    # resource_type='auto' handles both images and videos.
+                    result = cloudinary.uploader.upload(
+                        media_file, resource_type='auto', folder='messages'
+                    )
+                    media_url = result.get('secure_url', '')
+                except Exception:
+                    return JsonResponse({"error": "Couldn't upload that attachment"}, status=500)
 
             message = Message.objects.create(
                 conversation=conversation, sender=user, text=text,
-                media=media_file if media_file else None,
-                media_type=media_type,
+                media=media_url, media_type=media_type if media_url else '',
             )
 
             from notifications.utils import notify
@@ -498,8 +514,8 @@ def send_message(request, conversation_id):
             return JsonResponse({
                 "message": "Message sent",
                 "message_id": message.id,
-                "media_url": request.build_absolute_uri(message.media.url) if message.media else None,
-                "media_type": message.media_type,
+                "media_url": message.media or None,
+                "media_type": message.media_type or None,
                 "created_at": str(message.created_at),
             }, status=201)
 
@@ -531,7 +547,7 @@ def get_messages(request, conversation_id):
                     "sender": m.sender.username,
                     "sender_avatar": request.build_absolute_uri(m.sender.profile_image.url) if m.sender.profile_image else None,
                     "text": m.text,
-                    "media_url": request.build_absolute_uri(m.media.url) if m.media else None,
+                    "media_url": m.media or None,
                     "media_type": m.media_type or None,
                     "created_at": str(m.created_at),
                 }

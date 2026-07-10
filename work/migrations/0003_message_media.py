@@ -11,7 +11,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='message',
             name='media',
-            field=models.FileField(blank=True, null=True, upload_to='messages/'),
+            field=models.CharField(blank=True, default='', max_length=500),
         ),
         migrations.AddField(
             model_name='message',

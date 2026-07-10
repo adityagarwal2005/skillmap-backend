@@ -91,7 +91,7 @@ class Message(models.Model):
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name='messages')
     sender = models.ForeignKey(User, on_delete=models.CASCADE)
     text = models.TextField(blank=True, default='')
-    media = models.FileField(upload_to='messages/', null=True, blank=True)
+    media = models.CharField(max_length=500, blank=True, default='')   # Cloudinary URL
     media_type = models.CharField(max_length=10, choices=MEDIA_TYPE_CHOICES, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True, null=True)
 
