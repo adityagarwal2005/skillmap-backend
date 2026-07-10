@@ -122,6 +122,8 @@ def _job_item(wr, request, distance=None):
         'time_limit_hours': wr.time_limit_hours,
         'responses_count': wr.responses.count(),
         'distance_km': distance,
+        'media': wr.media or None,
+        'media_type': wr.media_type or None,
         'user': _feed_user(wr.created_by, request),
     }
 
@@ -137,6 +139,8 @@ def _collab_item(cp, request, distance=None):
         'collab_type': cp.collab_type,
         'applicants': cp.requests.count() if hasattr(cp, 'requests') else 0,
         'distance_km': distance,
+        'media': cp.media or None,
+        'media_type': cp.media_type or None,
         'user': _feed_user(cp.user, request),
     }
 

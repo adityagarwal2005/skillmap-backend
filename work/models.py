@@ -19,6 +19,8 @@ class WorkRequest(models.Model):
     assigned_to = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_work')
     latitude = models.FloatField(null=True, blank=True)
     longitude = models.FloatField(null=True, blank=True)
+    media = models.CharField(max_length=500, blank=True, default='')       # Cloudinary URL
+    media_type = models.CharField(max_length=10, blank=True, default='')   # image|video
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     expires_at = models.DateTimeField(null=True, blank=True)
 

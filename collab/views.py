@@ -47,6 +47,8 @@ def create_collab_post(request):
         
         latitude = request.POST.get("latitude", "").strip()
         longitude = request.POST.get("longitude", "").strip()
+        from users.views import upload_media_file
+        media_url, media_type = upload_media_file(request.FILES.get("media"))
         post = CollabPost.objects.create(
             user=user,
             title=title,
@@ -54,6 +56,8 @@ def create_collab_post(request):
             collab_type=collab_type,
             latitude=float(latitude) if latitude else None,
             longitude=float(longitude) if longitude else None,
+            media=media_url,
+            media_type=media_type,
         )
 
         if skills_input:
@@ -127,6 +131,8 @@ def show_collab_posts(request):
             'skills_needed':[s.name for s in post.skills_needed.all()],
             'applicants':   post.requests.count() if hasattr(post, 'requests') else 0,
             'distance_km':  dist_display,
+            'media':        post.media or None,
+            'media_type':   post.media_type or None,
         })
 
     total = len(results)

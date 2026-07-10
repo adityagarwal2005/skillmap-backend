@@ -51,6 +51,28 @@ def get_user_from_token(request):
         return None, JsonResponse({"error": "Invalid or expired token"}, status=401)
 
 
+def upload_media_file(media_file, folder='posts'):
+    """Upload an image/video to Cloudinary. Returns (url, media_type); ('', '')
+    on no file or failure (so a post is never blocked by a bad upload)."""
+    if not media_file:
+        return '', ''
+    ctype = (getattr(media_file, 'content_type', '') or '').lower()
+    media_type = 'video' if ctype.startswith('video') else 'image'
+    try:
+        import cloudinary, cloudinary.uploader
+        from django.conf import settings
+        cs = settings.CLOUDINARY_STORAGE
+        cloudinary.config(
+            cloud_name=cs.get('CLOUD_NAME'),
+            api_key=cs.get('API_KEY'),
+            api_secret=cs.get('API_SECRET'),
+        )
+        result = cloudinary.uploader.upload(media_file, resource_type='auto', folder=folder)
+        return result.get('secure_url', ''), media_type
+    except Exception:
+        return '', ''
+
+
 def has_contact(user):
     """True if the user has attached at least one identity/contact link so
     others can verify who they are: LinkedIn, Instagram, or WhatsApp."""

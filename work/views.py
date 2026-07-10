@@ -72,6 +72,8 @@ def create_work_request(request):
 
         latitude = request.POST.get("latitude", "").strip()
         longitude = request.POST.get("longitude", "").strip()
+        from users.views import upload_media_file
+        media_url, media_type = upload_media_file(request.FILES.get("media"))
         work_request = WorkRequest.objects.create(
             created_by=user,
             description=description,
@@ -81,6 +83,8 @@ def create_work_request(request):
             status='open',
             latitude=float(latitude) if latitude else None,
             longitude=float(longitude) if longitude else None,
+            media=media_url,
+            media_type=media_type,
         )
         work_request.required_skills.set(skill_objects)
 
@@ -175,6 +179,8 @@ def get_available_work_requests(request, user_id):
             'created_at':       str(wr.created_at) if wr.created_at else None,
             'distance_km':      dist_display,
             'responses_count':  wr.responses.count(),
+            'media':            wr.media or None,
+            'media_type':       wr.media_type or None,
         })
 
     total = len(results)
