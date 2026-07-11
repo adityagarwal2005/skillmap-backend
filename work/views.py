@@ -113,6 +113,9 @@ def get_my_work_requests(request, user_id):
                     "time_limit_hours": wr.time_limit_hours,
                     "status": wr.status,
                     "assigned_to": wr.assigned_to.username if wr.assigned_to else None,
+                    "assigned_to_id": wr.assigned_to_id,
+                    "completed_by_poster": wr.completed_by_poster,
+                    "completed_by_worker": wr.completed_by_worker,
                     "expires_at": str(wr.expires_at),
                     "responses_count": wr.responses.count(),
                     "created_at": str(wr.created_at),
@@ -344,6 +347,72 @@ def close_work_request(request, work_request_id):
             return JsonResponse({"error": "Work request not found or not yours"}, status=404)
 
     return JsonResponse({"error": "Method not allowed"}, status=405)
+
+
+def complete_work_request(request, work_request_id):
+    """Mutual completion: both the poster and the hired worker must confirm
+    before a job actually closes. Prevents one side unilaterally declaring a
+    job 'done' and lets us prompt both to rate each other once it's final."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    user, error = get_user_from_request(request)
+    if error:
+        return error
+
+    try:
+        wr = WorkRequest.objects.get(id=work_request_id)
+    except WorkRequest.DoesNotExist:
+        return JsonResponse({"error": "Job not found"}, status=404)
+
+    is_poster = user.id == wr.created_by_id
+    is_worker = wr.assigned_to_id is not None and user.id == wr.assigned_to_id
+    if not (is_poster or is_worker):
+        return JsonResponse({"error": "You're not part of this job"}, status=403)
+
+    if wr.status != 'assigned':
+        return JsonResponse({"error": "This job isn't in progress"}, status=400)
+
+    from notifications.utils import notify
+
+    if is_poster:
+        wr.completed_by_poster = True
+    else:
+        wr.completed_by_worker = True
+
+    both_confirmed = wr.completed_by_poster and wr.completed_by_worker
+
+    if both_confirmed:
+        from django.utils import timezone
+        wr.status = 'closed'
+        wr.completed_at = timezone.now()
+        wr.save()
+
+        from portfolio.models import PortfolioItem
+        if not PortfolioItem.objects.filter(verified_via_work=wr).exists():
+            item = PortfolioItem.objects.create(
+                user=wr.assigned_to,
+                title=f"Completed: {wr.description[:80]}",
+                description="Completed work for a client. Verified on SkillMap.",
+                portfolio_type='project',
+                verified=True,
+                verified_via_work=wr,
+            )
+            item.skills.set(wr.required_skills.all())
+
+        notify(wr.created_by, 'job_complete', "Job complete on both sides — rate each other!", actor=None)
+        notify(wr.assigned_to, 'job_complete', "Job complete on both sides — rate each other!", actor=None)
+    else:
+        wr.save()
+        other = wr.assigned_to if is_poster else wr.created_by
+        notify(other, 'job_complete', f"{user.username} marked the job complete — confirm to close it out", actor=user)
+
+    return JsonResponse({
+        "message": "Job marked complete by both sides" if both_confirmed else "Marked complete — waiting for the other side",
+        "status": wr.status,
+        "completed_by_poster": wr.completed_by_poster,
+        "completed_by_worker": wr.completed_by_worker,
+    })
 
 
 def send_work_proposal(request, receiver_id):
@@ -691,6 +760,8 @@ def get_my_applications(request):
             'posted_by': wr.created_by.username,
             'posted_by_id': wr.created_by.id,
             'payment_amount': wr.payment_amount,
+            'completed_by_poster': wr.completed_by_poster,
+            'completed_by_worker': wr.completed_by_worker,
         })
 
     # Collab: CollabRequest.applicant == user

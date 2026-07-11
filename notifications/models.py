@@ -12,6 +12,8 @@ class Notification(models.Model):
         ('message', 'Message'),
         ('reaction', 'Reaction'),
         ('comment', 'Comment'),
+        ('referral', 'Referral'),
+        ('job_complete', 'Job Complete'),
     ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')

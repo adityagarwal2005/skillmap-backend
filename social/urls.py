@@ -44,6 +44,7 @@ urlpatterns = [
     # Users
     path("users/search/", csrf_exempt(user_views.search_users)),
     path("users/discover/", csrf_exempt(user_views.discover_users)),
+    path("users/referrals/", csrf_exempt(user_views.get_my_referrals)),
     path("users/<int:user_id>/endorse/", csrf_exempt(user_views.endorse_skill)),
     path("users/<int:user_id>/", csrf_exempt(user_views.get_user)),
     path("users/<int:user_id>/edit/", csrf_exempt(user_views.edit_user)),
@@ -102,6 +103,7 @@ urlpatterns = [
     path("work/requests/<int:work_request_id>/responses/", csrf_exempt(work_views.get_work_request_responses)),
     path("work/requests/<int:work_request_id>/assign/", csrf_exempt(work_views.assign_work_request)),
     path("work/requests/<int:work_request_id>/close/", csrf_exempt(work_views.close_work_request)),
+    path("work/requests/<int:work_request_id>/complete/", csrf_exempt(work_views.complete_work_request)),
 
     # Work Proposals
     path("work/proposals/send/<int:receiver_id>/", csrf_exempt(work_views.send_work_proposal)),

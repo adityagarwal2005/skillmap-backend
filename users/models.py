@@ -28,6 +28,9 @@ class User(models.Model):
     headline = models.CharField(max_length=120, blank=True, default='')
     bio = models.TextField(blank=True, default='')
     profile_views = models.PositiveIntegerField(default=0)
+    invited_by = models.ForeignKey(
+        'self', on_delete=models.SET_NULL, null=True, blank=True, related_name='referrals'
+    )
     profile_image = models.ImageField(upload_to='avatars/', null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='not_available')
     created_at = models.DateTimeField(auto_now_add=True, null=True)

@@ -22,6 +22,9 @@ class WorkRequest(models.Model):
     range_km = models.FloatField(null=True, blank=True)   # only people within this many km see it
     media = models.CharField(max_length=500, blank=True, default='')       # Cloudinary URL
     media_type = models.CharField(max_length=10, blank=True, default='')   # image|video
+    completed_by_poster = models.BooleanField(default=False)
+    completed_by_worker = models.BooleanField(default=False)
+    completed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     expires_at = models.DateTimeField(null=True, blank=True)
 

@@ -234,12 +234,13 @@ def send_otp(request):
 
 def verify_otp_and_register(request):
     if request.method == 'POST':
-        username  = request.POST.get('username')
-        email     = request.POST.get('email')
-        password  = request.POST.get('password')
-        otp       = request.POST.get('otp')
-        latitude  = request.POST.get('latitude')
-        longitude = request.POST.get('longitude')
+        username    = request.POST.get('username')
+        email       = request.POST.get('email')
+        password    = request.POST.get('password')
+        otp         = request.POST.get('otp')
+        latitude    = request.POST.get('latitude')
+        longitude   = request.POST.get('longitude')
+        referred_by = request.POST.get('referred_by', '').strip()
 
         try:
             otp_obj = OTPVerification.objects.filter(
@@ -257,13 +258,22 @@ def verify_otp_and_register(request):
         if User.objects.filter(username=username).exists():
             return JsonResponse({'error': 'This username is already taken.'}, status=400)
 
+        referrer = None
+        if referred_by and referred_by.lower() != (username or '').lower():
+            referrer = User.objects.filter(username__iexact=referred_by).first()
+
         user = User.objects.create(
             username=username,
             email=email,
             password=make_password(password),
             latitude=float(latitude) if latitude else None,
             longitude=float(longitude) if longitude else None,
+            invited_by=referrer,
         )
+
+        if referrer:
+            from notifications.utils import notify
+            notify(referrer, 'referral', f"{username} joined SkillMap using your invite!", actor=None)
 
         tokens = get_tokens_for_user(user)
         return JsonResponse({
@@ -888,3 +898,22 @@ def register(request):
             'access':  tokens['access'],
             'refresh': tokens['refresh'],
         }, status=201)
+
+def get_my_referrals(request):
+    """Everyone who signed up using the logged-in user's invite link."""
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    user, error = get_user_from_token(request)
+    if error:
+        return error
+
+    referred = User.objects.filter(invited_by=user).order_by('-created_at')
+    data = [{
+        'id': u.id,
+        'username': u.username,
+        'profile_image': request.build_absolute_uri(u.profile_image.url) if u.profile_image else None,
+        'created_at': str(u.created_at) if u.created_at else None,
+    } for u in referred]
+
+    return JsonResponse({'referrals': data, 'count': len(data)})
