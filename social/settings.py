@@ -120,10 +120,24 @@ STORAGES = {
     'default': {
         'BACKEND': 'cloudinary_storage.storage.MediaCloudinaryStorage',
     },
+    # CompressedManifestStaticFilesStorage is STRICT: it hard-crashes (500) on
+    # any {% static %} reference not found in its manifest. That's exactly
+    # what broke /admin/login/ — Django admin's own CSS/JS were never
+    # collected (no admin.py was ever registered before, so nobody had ever
+    # rendered an admin page here to notice). CompressedStaticFilesStorage is
+    # the same whitenoise compression, just without the strict manifest
+    # lookup, so a missing/never-collected file degrades gracefully instead
+    # of crashing the page.
     'staticfiles': {
-        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+        'BACKEND': 'whitenoise.storage.CompressedStaticFilesStorage',
     },
 }
+
+# Serve static files straight from each app's static/ directory via Django's
+# staticfiles finders, so this works even if `collectstatic` is never run as
+# part of deploy (Render's free tier has no shell, and the user's Start
+# Command doesn't currently include it).
+WHITENOISE_USE_FINDERS = True
 
 CLOUDINARY_STORAGE = {
     'CLOUD_NAME': os.environ.get('CLOUDINARY_CLOUD_NAME'),
