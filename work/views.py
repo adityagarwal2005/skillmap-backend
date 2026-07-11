@@ -205,6 +205,10 @@ def respond_to_work_request(request, work_request_id):
         if error:
             return error
 
+        guard = require_contact(user)
+        if guard:
+            return guard
+
         status = request.POST.get("status", "").strip().lower()
         message = request.POST.get("message", "").strip()
 
