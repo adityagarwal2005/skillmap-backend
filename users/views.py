@@ -184,6 +184,26 @@ def report_content(request):
             return JsonResponse({"error": "Post not found"}, status=404)
 
     report.save()
+
+    # Reports otherwise just sit in Django admin until someone happens to
+    # check — this pings the same inbox wired up for error alerts. Backgrounded
+    # like the OTP emails so a slow SMTP connection doesn't hold up the response.
+    def _alert_admins():
+        try:
+            from django.core.mail import mail_admins
+            target = report.reported_user.username if report_type == "user" else f"post #{target_id}"
+            mail_admins(
+                f"[SkillMap] New report: {reason}",
+                f"{user.username} reported {report_type} ({target}) for '{reason}'.\n\n"
+                f"Details: {details or '(none)'}\n\nReview in /admin/users/report/",
+            )
+        except Exception:
+            pass
+
+    thread = threading.Thread(target=_alert_admins)
+    thread.daemon = True
+    thread.start()
+
     return JsonResponse({"message": "Report submitted. Thanks for helping keep SkillMap safe."})
 
 
@@ -199,6 +219,20 @@ def send_otp_email(username, email, otp):
         logger.info("OTP email sent to %s", email)
     except Exception as e:
         logger.error("Resend error sending OTP to %s: %s", email, e)
+
+
+def validate_password_strength(password, user=None):
+    """Return a 400 JsonResponse if the password fails Django's configured
+    AUTH_PASSWORD_VALIDATORS, else None. These raw JsonResponse views never
+    went through a form/serializer, so the validators in settings.py were
+    configured but never actually invoked — this was the missing call."""
+    from django.contrib.auth.password_validation import validate_password
+    from django.core.exceptions import ValidationError
+    try:
+        validate_password(password or '', user=user)
+    except ValidationError as e:
+        return JsonResponse({'error': ' '.join(e.messages)}, status=400)
+    return None
 
 
 def check_otp_cooldown(email, seconds=45):
@@ -280,6 +314,10 @@ def verify_otp_and_register(request):
         if User.objects.filter(username=username).exists():
             return JsonResponse({'error': 'This username is already taken.'}, status=400)
 
+        guard = validate_password_strength(password, user=User(username=username, email=email))
+        if guard:
+            return guard
+
         referrer = None
         if referred_by and referred_by.lower() != (username or '').lower():
             referrer = User.objects.filter(username__iexact=referred_by).first()
@@ -321,10 +359,11 @@ def change_password(request, user_id):
 
         if not new:
             return JsonResponse({"error": "New password is required"}, status=400)
-        if len(new) < 6:
-            return JsonResponse({"error": "New password must be at least 6 characters"}, status=400)
         if not check_password(current, user.password):
             return JsonResponse({"error": "Current password is incorrect"}, status=400)
+        guard = validate_password_strength(new, user=user)
+        if guard:
+            return guard
 
         user.password = make_password(new)
         user.save()
@@ -406,28 +445,85 @@ def verify_login_otp(request):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 
+def reset_password_with_otp(request):
+    """Forgot-password flow: verify the same email code used for OTP login,
+    then set a new password directly. Reuses send_login_otp to send the code
+    — no new email plumbing needed. Without this there was no self-service
+    recovery path at all if someone forgot their password."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    email = request.POST.get('email', '').strip()
+    otp = request.POST.get('otp', '').strip()
+    new_password = request.POST.get('new_password', '')
+
+    try:
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        return JsonResponse({'error': 'No account found with this email.'}, status=404)
+
+    try:
+        otp_obj = OTPVerification.objects.filter(
+            email=email, otp=otp, is_used=False
+        ).latest('created_at')
+    except OTPVerification.DoesNotExist:
+        return JsonResponse({'error': 'Invalid code. Please try again.'}, status=400)
+
+    if otp_obj.is_expired():
+        return JsonResponse({'error': 'Code expired. Please request a new one.'}, status=400)
+
+    guard = validate_password_strength(new_password, user=user)
+    if guard:
+        return guard
+
+    otp_obj.is_used = True
+    otp_obj.save()
+
+    user.password = make_password(new_password)
+    user.save()
+
+    tokens = get_tokens_for_user(user)
+    return JsonResponse({
+        'message': 'Password reset — you\'re signed in.',
+        'user_id': user.id,
+        'username': user.username,
+        'access':  tokens['access'],
+        'refresh': tokens['refresh'],
+    })
+
+
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_LOCKOUT_SECONDS = 15 * 60
+
+
 def login(request):
     if request.method == 'POST':
-        identifier = request.POST.get('username') or request.POST.get('identifier')
+        identifier = (request.POST.get('username') or request.POST.get('identifier') or '').strip()
         password   = request.POST.get('password')
 
-        # Try username first, then email
+        from django.core.cache import cache
+        cache_key = f'login_fail:{identifier.lower()}'
+        if cache.get(cache_key, 0) >= LOGIN_MAX_ATTEMPTS:
+            return JsonResponse({
+                'error': 'Too many failed attempts. Please try again in 15 minutes.'
+            }, status=429)
+
+        # Try username first, then email. Deliberately the same error either
+        # way (account-not-found vs wrong-password) below — telling them apart
+        # lets an attacker enumerate which usernames/emails have accounts.
         user = None
         try:
             user = User.objects.get(username=identifier)
         except User.DoesNotExist:
-            try:
-                user = User.objects.get(email=identifier)
-            except User.DoesNotExist:
-                return JsonResponse({
-                    'error': 'No account found with this username or email.'
-                }, status=404)
+            user = User.objects.filter(email=identifier).first()
 
-        if not check_password(password, user.password):
+        if not user or not check_password(password, user.password):
+            cache.set(cache_key, cache.get(cache_key, 0) + 1, LOGIN_LOCKOUT_SECONDS)
             return JsonResponse({
-                'error': 'Incorrect password. Please try again.'
+                'error': 'Incorrect username/email or password.'
             }, status=401)
 
+        cache.delete(cache_key)
         tokens = get_tokens_for_user(user)
         return JsonResponse({
             'message': f'Welcome, {user.username}!',
@@ -917,6 +1013,10 @@ def register(request):
 
         if User.objects.filter(email=email).exists():
             return JsonResponse({'error': 'This email is already registered. Please login instead.'}, status=400)
+
+        guard = validate_password_strength(password, user=User(username=username, email=email))
+        if guard:
+            return guard
 
         user = User.objects.create(
             username=username,

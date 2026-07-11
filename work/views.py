@@ -51,6 +51,12 @@ def create_work_request(request):
         if guard:
             return guard
 
+        # Cheap flood guard — without this a bad actor (or a buggy retry loop)
+        # could spam the Freelance feed with dozens of jobs in seconds.
+        recent = WorkRequest.objects.filter(created_by=user).order_by('-created_at').first()
+        if recent and (timezone.now() - recent.created_at).total_seconds() < 20:
+            return JsonResponse({"error": "Please wait a moment before posting again."}, status=429)
+
         description = request.POST.get("description", "").strip()
         payment_amount = request.POST.get("payment_amount", "").strip()
         time_limit_hours = request.POST.get("time_limit_hours", "").strip()
@@ -566,6 +572,12 @@ def send_message(request, conversation_id):
 
             if not conversation.participants.filter(id=user.id).exists():
                 return JsonResponse({"error": "You are not part of this conversation"}, status=403)
+
+            # Cheap flood guard — 1s is imperceptible to a human sender but
+            # blocks a script hammering this endpoint.
+            recent_msg = Message.objects.filter(sender=user).order_by('-created_at').first()
+            if recent_msg and (timezone.now() - recent_msg.created_at).total_seconds() < 1:
+                return JsonResponse({"error": "Sending too fast — slow down a bit."}, status=429)
 
             from django.db.models import Q
             from users.models import Block

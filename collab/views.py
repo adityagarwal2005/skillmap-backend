@@ -1,4 +1,5 @@
 from django.http import JsonResponse
+from django.utils import timezone
 from .models import CollabPost, CollabRequest
 from users.models import User
 from skills.models import Skill
@@ -32,6 +33,12 @@ def create_collab_post(request):
         guard = require_contact(user)
         if guard:
             return guard
+
+        # Cheap flood guard — without this a bad actor (or a buggy retry loop)
+        # could spam the Collab feed with dozens of posts in seconds.
+        recent = CollabPost.objects.filter(user=user).order_by('-created_at').first()
+        if recent and (timezone.now() - recent.created_at).total_seconds() < 20:
+            return JsonResponse({"error": "Please wait a moment before posting again."}, status=429)
 
         title = request.POST.get("title", "").strip()
         description = request.POST.get("description", "").strip()
