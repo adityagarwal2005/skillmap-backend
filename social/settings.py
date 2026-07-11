@@ -213,6 +213,47 @@ EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD')
 EMAIL_USE_TLS = True
 DEFAULT_FROM_EMAIL = os.environ.get('EMAIL_HOST_USER')
+
+# ── Error alerting ──
+# Any unhandled 500 gets emailed here via Django's built-in AdminEmailHandler,
+# reusing the SMTP account above (no new service to wire up). Set
+# ADMIN_ALERT_EMAIL in Render's env to a different inbox if you don't want
+# alerts going to the same address that sends OTP/notification mail;
+# otherwise it defaults to EMAIL_HOST_USER.
+_admin_alert_email = os.environ.get('ADMIN_ALERT_EMAIL') or EMAIL_HOST_USER
+ADMINS = [('SkillMap Admin', _admin_alert_email)] if _admin_alert_email else []
+# Gmail (and most SMTP providers) reject mail whose From header doesn't match
+# the authenticated account, so this must be EMAIL_HOST_USER, not a made-up
+# address — the legacy 'root@localhost' default would silently fail to send.
+SERVER_EMAIL = EMAIL_HOST_USER or 'root@localhost'
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'filters': {
+        'require_debug_false': {'()': 'django.utils.log.RequireDebugFalse'},
+    },
+    'handlers': {
+        'console': {'class': 'logging.StreamHandler', 'level': 'INFO'},
+        'mail_admins': {
+            'class': 'django.utils.log.AdminEmailHandler',
+            'level': 'ERROR',
+            # Only mails in production — DEBUG=True shows the error page directly.
+            'filters': ['require_debug_false'],
+        },
+    },
+    'loggers': {
+        'django': {'handlers': ['console'], 'level': 'INFO'},
+        # Every uncaught exception in a view (including the raw JsonResponse
+        # views that don't go through DRF) surfaces here via Django's request
+        # handling — this is the one place that catches all of them.
+        'django.request': {
+            'handlers': ['console', 'mail_admins'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+    },
+}
 # ── Web Push (VAPID) ──
 VAPID_PUBLIC_KEY = os.environ.get('VAPID_PUBLIC_KEY', '')
 VAPID_PRIVATE_KEY = os.environ.get('VAPID_PRIVATE_KEY', '')
