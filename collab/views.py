@@ -35,27 +35,24 @@ def create_collab_post(request):
 
         title = request.POST.get("title", "").strip()
         description = request.POST.get("description", "").strip()
-        collab_type = request.POST.get("collab_type", "experience").strip()
         skills_input = request.POST.get("skills", "").strip()
 
         if not title or not description:
             return JsonResponse({"error": "title and description are required"}, status=400)
 
-        valid_types = ['equity', 'experience', 'paid']
-        if collab_type not in valid_types:
-            return JsonResponse({"error": "collab_type must be equity, experience or paid"}, status=400)
-        
         latitude = request.POST.get("latitude", "").strip()
         longitude = request.POST.get("longitude", "").strip()
+        range_km = request.POST.get("range_km", "").strip()
         from users.views import upload_media_file
         media_url, media_type = upload_media_file(request.FILES.get("media"))
         post = CollabPost.objects.create(
             user=user,
             title=title,
             description=description,
-            collab_type=collab_type,
+            collab_type='experience',   # collab has no money deal — type removed
             latitude=float(latitude) if latitude else None,
             longitude=float(longitude) if longitude else None,
+            range_km=float(range_km) if range_km else None,
             media=media_url,
             media_type=media_type,
         )
@@ -115,7 +112,12 @@ def show_collab_posts(request):
         if latitude and longitude:
             if post.latitude is not None and post.longitude is not None:
                 distance = get_distance_km(float(latitude), float(longitude), post.latitude, post.longitude)
-                if distance > radius_km:
+                # The poster's chosen range caps visibility; the searcher's radius
+                # narrows it further. A post is shown only within both.
+                limit = radius_km
+                if post.range_km:
+                    limit = min(limit, post.range_km)
+                if distance > limit:
                     continue
                 dist_display = round(distance, 1)
             else:

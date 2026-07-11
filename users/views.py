@@ -642,13 +642,10 @@ def search_users(request):
         if category_id:
             users = users.filter(category_id=category_id)
 
-        # free-text search across name, category, and skills
+        # free-text search matches username only (skills are still near-empty
+        # at launch, and category is picked separately via the dropdown).
         if query:
-            users = users.filter(
-                Q(username__icontains=query) |
-                Q(category__name__icontains=query) |
-                Q(skills__name__icontains=query)
-            )
+            users = users.filter(username__icontains=query)
 
         # explicit skill-chip filter
         if skills:

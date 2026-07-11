@@ -72,6 +72,7 @@ def create_work_request(request):
 
         latitude = request.POST.get("latitude", "").strip()
         longitude = request.POST.get("longitude", "").strip()
+        range_km = request.POST.get("range_km", "").strip()
         from users.views import upload_media_file
         media_url, media_type = upload_media_file(request.FILES.get("media"))
         work_request = WorkRequest.objects.create(
@@ -83,6 +84,7 @@ def create_work_request(request):
             status='open',
             latitude=float(latitude) if latitude else None,
             longitude=float(longitude) if longitude else None,
+            range_km=float(range_km) if range_km else None,
             media=media_url,
             media_type=media_type,
         )
@@ -161,7 +163,12 @@ def get_available_work_requests(request, user_id):
                     float(latitude), float(longitude),
                     job_lat, job_lon
                 )
-                if distance > radius_km:
+                # The poster's chosen range caps visibility; the searcher's
+                # radius narrows it further. Shown only within both.
+                limit = radius_km
+                if wr.range_km:
+                    limit = min(limit, wr.range_km)
+                if distance > limit:
                     continue
                 dist_display = round(distance, 1)
             else:
