@@ -673,7 +673,17 @@ def search_users(request):
         if not (category_id or query or skills):
             return JsonResponse({'error': 'Enter a search term or pick a category'}, status=400)
 
+        # Optional — same as discover_users, the page is authed anyway, but
+        # this keeps the search usable even if the token lookup hiccups.
+        me, _ = get_user_from_token(request)
+
         users = User.objects.all()
+        if me:
+            users = users.exclude(id=me.id)
+            blocked = set(Block.objects.filter(blocker=me).values_list('blocked_id', flat=True))
+            blocked |= set(Block.objects.filter(blocked=me).values_list('blocker_id', flat=True))
+            if blocked:
+                users = users.exclude(id__in=blocked)
 
         if category_id:
             users = users.filter(category_id=category_id)

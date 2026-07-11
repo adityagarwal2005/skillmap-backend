@@ -139,12 +139,19 @@ def get_available_work_requests(request, user_id):
     latitude     = request.GET.get('latitude')
     longitude    = request.GET.get('longitude')
 
+    from users.models import Block
+    blocked = set(Block.objects.filter(blocker=user).values_list('blocked_id', flat=True))
+    blocked_by = set(Block.objects.filter(blocked=user).values_list('blocker_id', flat=True))
+    hidden = blocked | blocked_by
+
     # Newest first — this is a live job board.
     work_requests = WorkRequest.objects.filter(status='open').order_by('-created_at')
 
     results = []
     for wr in work_requests:
         if wr.created_by.id == user.id:
+            continue
+        if wr.created_by.id in hidden:
             continue
 
         if skill_filter:
@@ -226,6 +233,13 @@ def respond_to_work_request(request, work_request_id):
 
             if WorkRequestResponse.objects.filter(work_request=work_request, user=user).exists():
                 return JsonResponse({"error": "You have already responded to this request"}, status=400)
+
+            from users.models import Block
+            from django.db.models import Q
+            if Block.objects.filter(
+                Q(blocker=user, blocked=work_request.created_by) | Q(blocker=work_request.created_by, blocked=user)
+            ).exists():
+                return JsonResponse({"error": "You can't respond to this request"}, status=403)
 
             WorkRequestResponse.objects.create(
                 work_request=work_request,
@@ -717,6 +731,7 @@ def get_my_conversations(request):
         for c in conversations:
             other = c.participants.exclude(id=user.id).first()
             last_message = c.messages.order_by("-created_at").first()
+            activity_at = last_message.created_at if last_message else c.created_at
             data.append({
                 "id": c.id,
                 "type": c.conversation_type,
@@ -725,7 +740,15 @@ def get_my_conversations(request):
                 "with_avatar": request.build_absolute_uri(other.profile_image.url) if other and other.profile_image else None,
                 "last_message": last_message.text if last_message else None,
                 "last_message_at": str(last_message.created_at) if last_message else None,
+                "_activity_at": activity_at,
             })
+
+        # Most recently active conversation first — otherwise a chat from
+        # weeks ago could sit above one with a message from 5 minutes ago.
+        # (created_at/activity_at can be null on ancient rows, so those sort last.)
+        data.sort(key=lambda d: (d["_activity_at"] is None, d["_activity_at"] and -d["_activity_at"].timestamp()))
+        for d in data:
+            del d["_activity_at"]
 
         return JsonResponse({"conversations": data, "count": len(data)})
 

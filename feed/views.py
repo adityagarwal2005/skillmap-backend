@@ -163,6 +163,7 @@ def smart_feed(request):
     user_skills = {s.name.lower() for s in user.skills.all()}
     cat_id = user.category_id
     blocked = set(Block.objects.filter(blocker=user).values_list('blocked_id', flat=True))
+    blocked |= set(Block.objects.filter(blocked=user).values_list('blocker_id', flat=True))
 
     scored = []  # (score, created_at, kind, obj)
 
@@ -270,6 +271,7 @@ def trending_feed(request):
     from collab.models import CollabPost
 
     blocked = set(Block.objects.filter(blocker=user).values_list('blocked_id', flat=True))
+    blocked |= set(Block.objects.filter(blocked=user).values_list('blocker_id', flat=True))
     has_loc = user.latitude is not None and user.longitude is not None
 
     entries = []  # (distance_or_None, popularity, created_at, kind, obj)

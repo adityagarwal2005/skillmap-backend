@@ -84,16 +84,28 @@ def create_collab_post(request):
 
 
 def show_collab_posts(request):
+    user, error = get_user_from_request(request)
+    if error:
+        return error
+
     skill_filter = request.GET.get('skill', '').strip().lower()
     collab_type  = request.GET.get('type', '').strip()
     radius_km    = float(request.GET.get('radius', 50))
     latitude     = request.GET.get('latitude')
     longitude    = request.GET.get('longitude')
 
+    from users.models import Block
+    blocked = set(Block.objects.filter(blocker=user).values_list('blocked_id', flat=True))
+    blocked_by = set(Block.objects.filter(blocked=user).values_list('blocker_id', flat=True))
+    hidden = blocked | blocked_by
+
     posts = CollabPost.objects.filter(status='open')
 
     results = []
     for post in posts:
+        if post.user_id in hidden:
+            continue
+
         # Type filter
         if collab_type and post.collab_type != collab_type:
             continue
@@ -193,6 +205,13 @@ def apply_to_collab(request, post_id):
 
             if CollabRequest.objects.filter(collab_post=post, applicant=user).exists():
                 return JsonResponse({"error": "You already applied to this post"}, status=400)
+
+            from users.models import Block
+            from django.db.models import Q
+            if Block.objects.filter(
+                Q(blocker=user, blocked=post.user) | Q(blocker=post.user, blocked=user)
+            ).exists():
+                return JsonResponse({"error": "You can't apply to this post"}, status=403)
 
             message = request.POST.get("message", "").strip()
 
