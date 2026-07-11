@@ -200,6 +200,24 @@ def send_otp_email(username, email, otp):
     except Exception as e:
         logger.error("Resend error sending OTP to %s: %s", email, e)
 
+
+def check_otp_cooldown(email, seconds=45):
+    """429 if an OTP was already sent to this email within the last `seconds` —
+    without this, send_otp/send_login_otp had zero rate limit, so anyone could
+    spam a victim's inbox with codes or burn through the Resend sending quota
+    right when real signups need it most. None means it's fine to send."""
+    from django.utils import timezone
+    recent = OTPVerification.objects.filter(email=email).order_by('-created_at').first()
+    if recent:
+        elapsed = (timezone.now() - recent.created_at).total_seconds()
+        if elapsed < seconds:
+            return JsonResponse(
+                {'error': f'Please wait {int(seconds - elapsed)}s before requesting another code.'},
+                status=429,
+            )
+    return None
+
+
 def send_otp(request):
     if request.method == 'POST':
         email    = request.POST.get('email')
@@ -210,6 +228,10 @@ def send_otp(request):
 
         if User.objects.filter(email=email).exists():
             return JsonResponse({'error': 'Email already registered. Please login.'}, status=400)
+
+        guard = check_otp_cooldown(email)
+        if guard:
+            return guard
 
         otp = str(random.randint(100000, 999999))
 
@@ -325,6 +347,10 @@ def send_login_otp(request):
                 {'error': 'No account found with this email. Please register.'},
                 status=404,
             )
+
+        guard = check_otp_cooldown(email)
+        if guard:
+            return guard
 
         otp = str(random.randint(100000, 999999))
         OTPVerification.objects.filter(email=email).delete()
