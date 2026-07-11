@@ -756,6 +756,7 @@ def get_my_applications(request):
             'id': wr.id,
             'title': (wr.description or '').strip()[:70],
             'status': status,
+            'wr_status': wr.status,   # raw open/assigned/closed — 'status' above is a display label
             'applied_at': str(r.created_at) if r.created_at else None,
             'posted_by': wr.created_by.username,
             'posted_by_id': wr.created_by.id,
