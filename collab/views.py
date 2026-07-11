@@ -37,7 +37,7 @@ def create_collab_post(request):
         # Cheap flood guard — without this a bad actor (or a buggy retry loop)
         # could spam the Collab feed with dozens of posts in seconds.
         recent = CollabPost.objects.filter(user=user).order_by('-created_at').first()
-        if recent and (timezone.now() - recent.created_at).total_seconds() < 20:
+        if recent and recent.created_at and (timezone.now() - recent.created_at).total_seconds() < 20:
             return JsonResponse({"error": "Please wait a moment before posting again."}, status=429)
 
         title = request.POST.get("title", "").strip()

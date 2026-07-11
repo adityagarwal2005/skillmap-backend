@@ -308,15 +308,18 @@ def verify_otp_and_register(request):
         if otp_obj.is_expired():
             return JsonResponse({'error': 'OTP expired. Please request a new one.'}, status=400)
 
-        otp_obj.is_used = True
-        otp_obj.save()
-
         if User.objects.filter(username=username).exists():
             return JsonResponse({'error': 'This username is already taken.'}, status=400)
 
         guard = validate_password_strength(password, user=User(username=username, email=email))
         if guard:
             return guard
+
+        # Only burn the code once everything else has actually succeeded —
+        # otherwise a taken username or a weak password error forced the user
+        # to request a brand new email code just to fix a typo.
+        otp_obj.is_used = True
+        otp_obj.save()
 
         referrer = None
         if referred_by and referred_by.lower() != (username or '').lower():
@@ -481,6 +484,13 @@ def reset_password_with_otp(request):
 
     user.password = make_password(new_password)
     user.save()
+
+    # A forgotten password is exactly what triggers login()'s lockout in the
+    # first place — clear it under both possible identifiers (login() accepts
+    # either) so a successful reset doesn't leave the account still locked out.
+    from django.core.cache import cache
+    cache.delete(f'login_fail:{user.username.lower()}')
+    cache.delete(f'login_fail:{user.email.lower()}')
 
     tokens = get_tokens_for_user(user)
     return JsonResponse({
