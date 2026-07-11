@@ -77,6 +77,7 @@ class Conversation(models.Model):
     TYPE_CHOICES = [
         ('freelance', 'Freelance'),
         ('work', 'Work'),
+        ('direct', 'Direct'),
     ]
 
     participants = models.ManyToManyField(User, related_name='conversations')

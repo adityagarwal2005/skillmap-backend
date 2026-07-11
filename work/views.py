@@ -644,8 +644,9 @@ def get_messages(request, conversation_id):
 
 
 def start_conversation(request, user_id):
-    """Get-or-create a 1:1 direct conversation with another user, so anyone can
-    message anyone (not only after a proposal/collab is accepted)."""
+    """Get-or-create a 1:1 direct conversation with another user. Only allowed
+    once the two have actually worked together (an assigned freelance job, an
+    accepted work proposal, or an accepted collab) — see the check below."""
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
