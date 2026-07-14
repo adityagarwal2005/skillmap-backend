@@ -3,7 +3,7 @@ from django.contrib.auth.hashers import make_password, check_password
 from django.core.mail import send_mail
 from rest_framework_simplejwt.tokens import RefreshToken
 from smtplib import SMTPException
-from .models import User, StudentProfile, OTPVerification, Block, Report, SkillEndorsement
+from .models import User, StudentProfile, OTPVerification, Block, Report, SkillEndorsement, Friendship
 from skills.models import Category, Skill
 import math
 import random
@@ -142,6 +142,152 @@ def get_blocked_users(request):
         for b in blocks
     ]
     return JsonResponse({"blocked_users": data, "count": len(data)})
+
+
+# ── Friends ──
+# A friendship is a second, work-independent path to messaging: once two users
+# are accepted friends they can DM each other (see start_conversation). Friend
+# discovery is purely by username/profile — location plays no part.
+
+def _blocked_between(a, b):
+    from django.db.models import Q
+    return Block.objects.filter(
+        Q(blocker=a, blocked=b) | Q(blocker=b, blocked=a)
+    ).exists()
+
+
+def friendship_between(a, b):
+    """The Friendship row between two users (either direction), or None."""
+    from django.db.models import Q
+    return Friendship.objects.filter(
+        Q(requester=a, receiver=b) | Q(requester=b, receiver=a)
+    ).first()
+
+
+def friend_state(me, other):
+    """My relationship to `other`: 'friends' | 'request_sent' | 'request_received' | 'none'."""
+    f = friendship_between(me, other)
+    if not f:
+        return 'none'
+    if f.status == 'accepted':
+        return 'friends'
+    return 'request_sent' if f.requester_id == me.id else 'request_received'
+
+
+def send_friend_request(request, user_id):
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    user, error = get_user_from_token(request)
+    if error:
+        return error
+    if user.id == user_id:
+        return JsonResponse({"error": "You can't add yourself"}, status=400)
+    try:
+        other = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return JsonResponse({"error": "User not found"}, status=404)
+    if _blocked_between(user, other):
+        return JsonResponse({"error": "You can't add this user"}, status=403)
+
+    existing = friendship_between(user, other)
+    if existing:
+        if existing.status == 'accepted':
+            return JsonResponse({"status": "friends", "message": "Already friends"})
+        if existing.requester_id == user.id:
+            return JsonResponse({"status": "request_sent", "message": "Request already sent"})
+        # They already sent ME a request → adding them back means mutual intent.
+        existing.status = 'accepted'
+        existing.save()
+        from notifications.utils import notify
+        notify(other, 'friend_accepted', f"{user.username} accepted your friend request", actor=user)
+        return JsonResponse({"status": "friends", "message": f"You and {other.username} are now friends"})
+
+    Friendship.objects.create(requester=user, receiver=other, status='pending')
+    from notifications.utils import notify
+    notify(other, 'friend_request', f"{user.username} sent you a friend request", actor=user)
+    return JsonResponse({"status": "request_sent", "message": "Friend request sent"})
+
+
+def respond_friend_request(request, user_id):
+    """Accept or reject a pending request that `user_id` sent to me."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    user, error = get_user_from_token(request)
+    if error:
+        return error
+    action = request.POST.get("action", "").strip().lower()
+    if action not in ("accept", "reject"):
+        return JsonResponse({"error": "action must be 'accept' or 'reject'"}, status=400)
+    try:
+        req = Friendship.objects.get(requester_id=user_id, receiver=user, status='pending')
+    except Friendship.DoesNotExist:
+        return JsonResponse({"error": "No pending request from this user"}, status=404)
+
+    if action == 'accept':
+        req.status = 'accepted'
+        req.save()
+        from notifications.utils import notify
+        notify(req.requester, 'friend_accepted', f"{user.username} accepted your friend request", actor=user)
+        return JsonResponse({"status": "friends", "message": "You're now friends"})
+
+    req.delete()
+    return JsonResponse({"status": "none", "message": "Request declined"})
+
+
+def remove_friend(request, user_id):
+    """Unfriend, or cancel a request I sent — deletes the row either direction."""
+    if request.method not in ("POST", "DELETE"):
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    user, error = get_user_from_token(request)
+    if error:
+        return error
+    from django.db.models import Q
+    Friendship.objects.filter(
+        Q(requester=user, receiver_id=user_id) | Q(requester_id=user_id, receiver=user)
+    ).delete()
+    return JsonResponse({"status": "none", "message": "Removed"})
+
+
+def get_friend_requests(request):
+    """Incoming pending friend requests (people who want to friend me)."""
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    user, error = get_user_from_token(request)
+    if error:
+        return error
+    reqs = Friendship.objects.filter(receiver=user, status='pending').select_related('requester')
+    data = [{
+        "id": f.requester.id,
+        "username": f.requester.username,
+        "profile_image": request.build_absolute_uri(f.requester.profile_image.url) if f.requester.profile_image else None,
+        "headline": f.requester.headline,
+        "requested_at": f.created_at,
+    } for f in reqs]
+    return JsonResponse({"requests": data, "count": len(data)})
+
+
+def get_friends(request):
+    """My accepted friends."""
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    user, error = get_user_from_token(request)
+    if error:
+        return error
+    from django.db.models import Q
+    friendships = Friendship.objects.filter(
+        Q(requester=user) | Q(receiver=user), status='accepted'
+    ).select_related('requester', 'receiver')
+    data = []
+    for f in friendships:
+        other = f.receiver if f.requester_id == user.id else f.requester
+        data.append({
+            "id": other.id,
+            "username": other.username,
+            "profile_image": request.build_absolute_uri(other.profile_image.url) if other.profile_image else None,
+            "headline": other.headline,
+            "status": other.status,
+        })
+    return JsonResponse({"friends": data, "count": len(data)})
 
 
 def report_content(request):
@@ -621,6 +767,12 @@ def get_user(request, user_id):
                 "bio": user.bio,
                 "profile_image": request.build_absolute_uri(user.profile_image.url) if user.profile_image else None,
                 "created_at": user.created_at,
+                # 'self' | 'friends' | 'request_sent' | 'request_received' | 'none'
+                "friendship_status": (
+                    'self' if (viewer and viewer.id == user.id)
+                    else friend_state(viewer, user) if viewer
+                    else 'none'
+                ),
             })
         except User.DoesNotExist:
             return JsonResponse({"error": "User not found"}, status=404)
@@ -807,6 +959,24 @@ def search_users(request):
 
         users = users.distinct()
 
+        # Friend state for each result, so the People page can show the right
+        # button per person. One query, then a dict lookup — no N+1.
+        friend_ids, sent_ids, recv_ids = set(), set(), set()
+        if me:
+            for f in Friendship.objects.filter(Q(requester=me) | Q(receiver=me)):
+                if f.status == 'accepted':
+                    friend_ids.add(f.receiver_id if f.requester_id == me.id else f.requester_id)
+                elif f.requester_id == me.id:
+                    sent_ids.add(f.receiver_id)
+                else:
+                    recv_ids.add(f.requester_id)
+
+        def _fstate(uid):
+            if uid in friend_ids: return 'friends'
+            if uid in sent_ids: return 'request_sent'
+            if uid in recv_ids: return 'request_received'
+            return 'none'
+
         results = []
         for u in users:
             # location filter — only apply if both user and searcher have location
@@ -833,6 +1003,7 @@ def search_users(request):
                 'distance_km': dist_display,
                 'latitude': u.latitude,
                 'longitude': u.longitude,
+                'friendship_status': _fstate(u.id),
             })
 
         total = len(results)

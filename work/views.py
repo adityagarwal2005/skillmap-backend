@@ -706,10 +706,16 @@ def start_conversation(request, user_id):
         if c.participants.count() == 2:
             return JsonResponse({"conversation_id": c.id})
 
-    # No conversation yet — messaging is only allowed between people who have
-    # actually worked together: an accepted freelance job or collab.
+    # No conversation yet — messaging is allowed either between friends, or
+    # between people who've actually worked together (an assigned freelance job,
+    # an accepted work proposal, or an accepted collab).
     from collab.models import CollabRequest
-    connected = (
+    from users.models import Friendship
+    are_friends = Friendship.objects.filter(
+        Q(requester=user, receiver=other) | Q(requester=other, receiver=user),
+        status='accepted'
+    ).exists()
+    connected = are_friends or (
         WorkRequest.objects.filter(
             Q(created_by=user, assigned_to=other) | Q(created_by=other, assigned_to=user)
         ).exists()
@@ -723,7 +729,7 @@ def start_conversation(request, user_id):
     )
     if not connected:
         return JsonResponse({
-            "error": "You can only message people you've worked with — apply to their collab or freelance job (or accept theirs) first."
+            "error": "You can only message friends or people you've worked with — add them as a friend, or apply to their collab/freelance job first."
         }, status=403)
 
     convo = Conversation.objects.create(conversation_type='direct')

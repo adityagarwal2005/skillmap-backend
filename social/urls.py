@@ -46,6 +46,14 @@ urlpatterns = [
     path("users/search/", csrf_exempt(user_views.search_users)),
     path("users/discover/", csrf_exempt(user_views.discover_users)),
     path("users/referrals/", csrf_exempt(user_views.get_my_referrals)),
+
+    # Friends (username-based, location-independent)
+    path("users/friends/", csrf_exempt(user_views.get_friends)),
+    path("users/friend-requests/", csrf_exempt(user_views.get_friend_requests)),
+    path("users/<int:user_id>/friend/", csrf_exempt(user_views.send_friend_request)),
+    path("users/<int:user_id>/friend/respond/", csrf_exempt(user_views.respond_friend_request)),
+    path("users/<int:user_id>/friend/remove/", csrf_exempt(user_views.remove_friend)),
+
     path("users/<int:user_id>/endorse/", csrf_exempt(user_views.endorse_skill)),
     path("users/<int:user_id>/", csrf_exempt(user_views.get_user)),
     path("users/<int:user_id>/edit/", csrf_exempt(user_views.edit_user)),

@@ -137,3 +137,28 @@ class Report(models.Model):
     def __str__(self):
         target = self.reported_user.username if self.reported_user else f"post #{self.reported_post_id}"
         return f"{self.reporter.username} reported {target} ({self.reason})"
+
+
+class Friendship(models.Model):
+    """A friend link between two users. One row per pair. `requester` sent it,
+    `receiver` gets to accept/reject. 'accepted' means they're friends and can
+    message each other directly (independent of any freelance/collab history).
+    A rejected request is deleted (no row), so the requester can try again later.
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('accepted', 'Accepted'),
+    ]
+    requester = models.ForeignKey(User, on_delete=models.CASCADE, related_name='friend_requests_sent')
+    receiver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='friend_requests_received')
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        # At most one request row per ordered pair. The friend-request view also
+        # blocks the reverse pair from creating a second row (it auto-accepts
+        # instead), so a given unordered pair never has two rows.
+        unique_together = ('requester', 'receiver')
+
+    def __str__(self):
+        return f"{self.requester.username} → {self.receiver.username} ({self.status})"
