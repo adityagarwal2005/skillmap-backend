@@ -3,6 +3,8 @@ __pycache__/
 *.pyc
 *.pyo
 db.sqlite3
+test_local.db
+social/local_test_settings.py
 media/
 staticfiles/
 .venv/
