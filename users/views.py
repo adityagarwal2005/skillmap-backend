@@ -5,7 +5,6 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from smtplib import SMTPException
 from .models import User, StudentProfile, OTPVerification, Block, Report, SkillEndorsement, Friendship
 from skills.models import Category, Skill
-import math
 import random
 import threading
 import resend
@@ -13,16 +12,6 @@ import os
 import logging
 
 logger = logging.getLogger(__name__)
-
-def get_distance_km(lat1, lon1, lat2, lon2):
-    R = 6371
-    d_lat = math.radians(lat2 - lat1)
-    d_lon = math.radians(lon2 - lon1)
-    a = (math.sin(d_lat / 2) ** 2 +
-         math.cos(math.radians(lat1)) *
-         math.cos(math.radians(lat2)) *
-         math.sin(d_lon / 2) ** 2)
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 def get_tokens_for_user(user):
@@ -74,21 +63,23 @@ def upload_media_file(media_file, folder='posts'):
 
 
 def has_contact(user):
-    """True if the user has attached at least one identity/contact link so
-    others can verify who they are: LinkedIn, Instagram, or WhatsApp."""
+    """True if the user has connected at least one identity account so others
+    can verify who they are: GitHub, LinkedIn, or Instagram. This is the same
+    check onboarding's "Connect an account" step enforces — WhatsApp isn't
+    part of it, since it isn't collected during onboarding."""
     return bool(
-        (user.linkedin_url or '').strip()
+        (user.github_url or '').strip()
+        or (user.linkedin_url or '').strip()
         or (user.instagram_url or '').strip()
-        or (getattr(user, 'whatsapp', '') or '').strip()
     )
 
 
 def require_contact(user):
-    """Return a 403 JsonResponse if the user hasn't attached a contact yet,
+    """Return a 403 JsonResponse if the user hasn't connected an account yet,
     else None. Gate work/collab posting + accepting behind this."""
     if not has_contact(user):
         return JsonResponse({
-            "error": "Add a LinkedIn, Instagram, or WhatsApp to your profile first "
+            "error": "Connect a GitHub, LinkedIn, or Instagram account first "
                      "so people can verify who they're working with.",
             "code": "contact_required",
         }, status=403)
@@ -916,46 +907,26 @@ def update_status(request):
 
 
 def search_users(request):
+    """Find people by username only — no category, no skills, no location.
+    Anyone anywhere can be found as long as you know (part of) their username."""
     if request.method == 'GET':
         from django.db.models import Q
 
-        category_id = request.GET.get('category_id')
-        latitude    = request.GET.get('latitude')
-        longitude   = request.GET.get('longitude')
-        radius_km   = float(request.GET.get('radius', 50))
-        skills      = request.GET.get('skills', '').strip()
-        query       = request.GET.get('q', '').strip()
-
-        # A search needs at least one narrowing filter so we never dump the
-        # whole user table. Category, a free-text query, or skills all qualify.
-        if not (category_id or query or skills):
-            return JsonResponse({'error': 'Enter a search term or pick a category'}, status=400)
+        query = request.GET.get('q', '').strip()
+        if not query:
+            return JsonResponse({'error': 'Enter a username to search'}, status=400)
 
         # Optional — same as discover_users, the page is authed anyway, but
         # this keeps the search usable even if the token lookup hiccups.
         me, _ = get_user_from_token(request)
 
-        users = User.objects.all()
+        users = User.objects.filter(username__icontains=query)
         if me:
             users = users.exclude(id=me.id)
             blocked = set(Block.objects.filter(blocker=me).values_list('blocked_id', flat=True))
             blocked |= set(Block.objects.filter(blocked=me).values_list('blocker_id', flat=True))
             if blocked:
                 users = users.exclude(id__in=blocked)
-
-        if category_id:
-            users = users.filter(category_id=category_id)
-
-        # free-text search matches username only (skills are still near-empty
-        # at launch, and category is picked separately via the dropdown).
-        if query:
-            users = users.filter(username__icontains=query)
-
-        # explicit skill-chip filter
-        if skills:
-            skill_list = [s.strip().lower() for s in skills.split(',')]
-            for skill in skill_list:
-                users = users.filter(skills__name__icontains=skill)
 
         users = users.distinct()
 
@@ -977,34 +948,19 @@ def search_users(request):
             if uid in recv_ids: return 'request_received'
             return 'none'
 
-        results = []
-        for u in users:
-            # location filter — only apply if both user and searcher have location
-            if latitude and longitude and u.latitude and u.longitude:
-                distance = get_distance_km(
-                    float(latitude), float(longitude),
-                    u.latitude, u.longitude
-                )
-                if distance > radius_km:
-                    continue
-                dist_display = round(distance, 1)
-            else:
-                dist_display = None
-
-            results.append({
-                'id':       u.id,
-                'username': u.username,
-                'category': u.category.name if u.category else None,
-                'headline': u.headline,
-                'profile_image': request.build_absolute_uri(u.profile_image.url) if u.profile_image else None,
-                'skills':   [s.name for s in u.skills.all()],
-                'rating':   u.rating,
-                'status':   u.status,
-                'distance_km': dist_display,
-                'latitude': u.latitude,
-                'longitude': u.longitude,
-                'friendship_status': _fstate(u.id),
-            })
+        # No contact info here — just enough to identify someone and open
+        # their profile. Whoever they are, wherever they are.
+        results = [{
+            'id':       u.id,
+            'username': u.username,
+            'category': u.category.name if u.category else None,
+            'headline': u.headline,
+            'profile_image': request.build_absolute_uri(u.profile_image.url) if u.profile_image else None,
+            'skills':   [s.name for s in u.skills.all()],
+            'rating':   u.rating,
+            'status':   u.status,
+            'friendship_status': _fstate(u.id),
+        } for u in users]
 
         total = len(results)
         try:
