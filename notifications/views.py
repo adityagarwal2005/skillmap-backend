@@ -1,6 +1,6 @@
 from django.http import JsonResponse
 from .models import Notification
-from users.views import get_user_from_token
+from users.views import get_user_from_token, friend_state
 
 
 def get_user_from_request(request):
@@ -13,17 +13,27 @@ def get_my_notifications(request):
         if error:
             return error
 
-        notifications = Notification.objects.filter(user=user).order_by("-created_at")
-        data = [
-            {
+        notifications = Notification.objects.filter(user=user).select_related("actor").order_by("-created_at")
+        data = []
+        for n in notifications:
+            item = {
                 "id": n.id,
                 "type": n.notification_type,
                 "message": n.message,
                 "is_read": n.is_read,
                 "created_at": n.created_at,
+                "actor_id": n.actor_id,
+                "actor_username": n.actor.username if n.actor else None,
+                "actor_avatar": (
+                    request.build_absolute_uri(n.actor.profile_image.url)
+                    if n.actor and n.actor.profile_image else None
+                ),
             }
-            for n in notifications
-        ]
+            # Live status, not a snapshot — so Accept/Decline disappears here
+            # the moment it's actioned from anywhere (this page, People, etc).
+            if n.notification_type == "friend_request" and n.actor_id:
+                item["friendship_status"] = friend_state(user, n.actor)
+            data.append(item)
         return JsonResponse({"notifications": data, "count": len(data)})
 
     return JsonResponse({"error": "Method not allowed"}, status=405)

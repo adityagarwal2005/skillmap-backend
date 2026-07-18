@@ -54,6 +54,7 @@ def notify(recipient, notification_type, message, actor=None):
             user=recipient,
             notification_type=notification_type,
             message=message,
+            actor=actor,
         )
     except Exception:
         pass
