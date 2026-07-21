@@ -14,6 +14,15 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _safe_profile_url(url):
+    """Only allow http(s) links for user-supplied profile URLs. These are
+    rendered as clickable <a href> on public profile pages with no further
+    sanitization, so without this a javascript: URI saved here would run
+    in any visitor's browser who clicks the link (stored XSS -> token
+    theft, since JWTs live in localStorage)."""
+    return url.lower().startswith('http://') or url.lower().startswith('https://')
+
+
 def get_tokens_for_user(user):
     refresh = RefreshToken()
     refresh['user_id'] = user.id
@@ -40,10 +49,34 @@ def get_user_from_token(request):
         return None, JsonResponse({"error": "Invalid or expired token"}, status=401)
 
 
+ALLOWED_IMAGE_TYPES = {'image/jpeg', 'image/png', 'image/webp', 'image/gif'}
+ALLOWED_MEDIA_TYPES = ALLOWED_IMAGE_TYPES | {'video/mp4', 'video/webm', 'video/quicktime'}
+MAX_MEDIA_BYTES = 50 * 1024 * 1024  # 50MB
+
+
+def validate_media_upload(media_file, images_only=False):
+    """Reject a disallowed content-type or oversized file before it ever
+    reaches Cloudinary. Previously there was no allow-list or size cap at
+    all, so any authenticated user could upload arbitrary file types at
+    unlimited size — real cost/abuse exposure (Cloudinary storage/bandwidth)
+    and a way to host non-media files under the app's CDN. Returns an error
+    message, or None if the file is fine."""
+    ctype = (getattr(media_file, 'content_type', '') or '').lower()
+    allowed = ALLOWED_IMAGE_TYPES if images_only else ALLOWED_MEDIA_TYPES
+    if ctype not in allowed:
+        return f"Unsupported file type: {ctype or 'unknown'}"
+    if media_file.size > MAX_MEDIA_BYTES:
+        return f"File too large — max {MAX_MEDIA_BYTES // (1024 * 1024)}MB"
+    return None
+
+
 def upload_media_file(media_file, folder='posts'):
     """Upload an image/video to Cloudinary. Returns (url, media_type); ('', '')
-    on no file or failure (so a post is never blocked by a bad upload)."""
+    on no file, an invalid file, or an upload failure (so a post is never
+    blocked by a bad upload — it's just posted without media)."""
     if not media_file:
+        return '', ''
+    if validate_media_upload(media_file):
         return '', ''
     ctype = (getattr(media_file, 'content_type', '') or '').lower()
     media_type = 'video' if ctype.startswith('video') else 'image'
@@ -389,6 +422,40 @@ def check_otp_cooldown(email, seconds=45):
     return None
 
 
+OTP_MAX_ATTEMPTS = 5
+OTP_LOCKOUT_SECONDS = 15 * 60
+
+
+def _otp_attempts_key(email):
+    return f'otp_fail:{email.strip().lower()}'
+
+
+def check_otp_attempts(email):
+    """429 once a given email has racked up too many wrong codes. Without
+    this, a 6-digit OTP with no attempt cap is brute-forceable in minutes —
+    login-by-OTP and password-reset both trust 'the caller knows the code'
+    as proof of email ownership, so this is the only thing standing between
+    a guessed code and signing in as someone else."""
+    from django.core.cache import cache
+    if cache.get(_otp_attempts_key(email), 0) >= OTP_MAX_ATTEMPTS:
+        return JsonResponse(
+            {'error': 'Too many incorrect codes. Please request a new one.'},
+            status=429,
+        )
+    return None
+
+
+def record_otp_failure(email):
+    from django.core.cache import cache
+    key = _otp_attempts_key(email)
+    cache.set(key, cache.get(key, 0) + 1, OTP_LOCKOUT_SECONDS)
+
+
+def clear_otp_attempts(email):
+    from django.core.cache import cache
+    cache.delete(_otp_attempts_key(email))
+
+
 def send_otp(request):
     if request.method == 'POST':
         email    = request.POST.get('email')
@@ -435,11 +502,16 @@ def verify_otp_and_register(request):
         longitude   = request.POST.get('longitude')
         referred_by = request.POST.get('referred_by', '').strip()
 
+        guard = check_otp_attempts(email)
+        if guard:
+            return guard
+
         try:
             otp_obj = OTPVerification.objects.filter(
                 email=email, otp=otp, is_used=False
             ).latest('created_at')
         except OTPVerification.DoesNotExist:
+            record_otp_failure(email)
             return JsonResponse({'error': 'Invalid OTP. Please try again.'}, status=400)
 
         if otp_obj.is_expired():
@@ -457,6 +529,7 @@ def verify_otp_and_register(request):
         # to request a brand new email code just to fix a typo.
         otp_obj.is_used = True
         otp_obj.save()
+        clear_otp_attempts(email)
 
         referrer = None
         if referred_by and referred_by.lower() != (username or '').lower():
@@ -555,6 +628,10 @@ def verify_login_otp(request):
         email = request.POST.get('email', '').strip()
         otp   = request.POST.get('otp', '').strip()
 
+        guard = check_otp_attempts(email)
+        if guard:
+            return guard
+
         try:
             user = User.objects.get(email=email)
         except User.DoesNotExist:
@@ -565,6 +642,7 @@ def verify_login_otp(request):
                 email=email, otp=otp, is_used=False
             ).latest('created_at')
         except OTPVerification.DoesNotExist:
+            record_otp_failure(email)
             return JsonResponse({'error': 'Invalid code. Please try again.'}, status=400)
 
         if otp_obj.is_expired():
@@ -572,6 +650,7 @@ def verify_login_otp(request):
 
         otp_obj.is_used = True
         otp_obj.save()
+        clear_otp_attempts(email)
 
         tokens = get_tokens_for_user(user)
         return JsonResponse({
@@ -597,6 +676,10 @@ def reset_password_with_otp(request):
     otp = request.POST.get('otp', '').strip()
     new_password = request.POST.get('new_password', '')
 
+    guard = check_otp_attempts(email)
+    if guard:
+        return guard
+
     try:
         user = User.objects.get(email=email)
     except User.DoesNotExist:
@@ -607,6 +690,7 @@ def reset_password_with_otp(request):
             email=email, otp=otp, is_used=False
         ).latest('created_at')
     except OTPVerification.DoesNotExist:
+        record_otp_failure(email)
         return JsonResponse({'error': 'Invalid code. Please try again.'}, status=400)
 
     if otp_obj.is_expired():
@@ -618,6 +702,7 @@ def reset_password_with_otp(request):
 
     otp_obj.is_used = True
     otp_obj.save()
+    clear_otp_attempts(email)
 
     user.password = make_password(new_password)
     user.save()
@@ -736,10 +821,15 @@ def get_user(request, user_id):
                 'endorsed_by_me': s.name in my_endorsements,
             } for s in user.skills.all()]
 
+            is_self = bool(viewer and viewer.id == user.id)
             return JsonResponse({
                 "id": user.id,
                 "username": user.username,
-                "email": user.email,
+                # Only ever return the email to the account it belongs to —
+                # this endpoint is public (viewer is optional), so returning
+                # it unconditionally let anyone scrape any user's email by
+                # ID, which feeds straight into OTP/phishing attacks.
+                "email": user.email if is_self else None,
                 "category": user.category.name if user.category else None,
                 "skills": [s['name'] for s in skills],       # back-compat: list of names
                 "skills_detail": skills,                      # names + endorsement counts
@@ -818,7 +908,6 @@ def edit_user(request, user_id):
 
         username = request.POST.get("username", "").strip()
         email = request.POST.get("email", "").strip()
-        password = request.POST.get("password", "").strip()
         latitude = request.POST.get("latitude", "").strip()
         longitude = request.POST.get("longitude", "").strip()
         category_id = request.POST.get("category_id", "").strip()
@@ -831,12 +920,24 @@ def edit_user(request, user_id):
             user.username = username
         if email:
             user.email = email
-        if password:
-            user.password = make_password(password)
+        # Password changes go through change_password only — that endpoint
+        # requires the current password and runs the strength validators;
+        # this one didn't, so it silently bypassed both if anyone hit the
+        # API directly. The frontend never posts `password` here anyway.
         if latitude:
             user.latitude = float(latitude)
         if longitude:
             user.longitude = float(longitude)
+        for field_name, value in (
+            ('linkedin_url', linkedin_url),
+            ('github_url', github_url),
+            ('instagram_url', instagram_url),
+        ):
+            if value and not _safe_profile_url(value):
+                return JsonResponse(
+                    {"error": f"{field_name.replace('_url', '').title()} link must start with http:// or https://"},
+                    status=400,
+                )
         if linkedin_url:
             user.linkedin_url = linkedin_url
         if github_url:
@@ -857,6 +958,9 @@ def edit_user(request, user_id):
             user.bio = bio.strip()
         profile_image = request.FILES.get("profile_image")
         if profile_image:
+            bad = validate_media_upload(profile_image, images_only=True)
+            if bad:
+                return JsonResponse({"error": bad}, status=400)
             user.profile_image = profile_image
         if category_id:
             try:

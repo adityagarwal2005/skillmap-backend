@@ -597,6 +597,10 @@ def send_message(request, conversation_id):
             media_url = ''
             media_type = ''
             if media_file:
+                from users.views import validate_media_upload
+                bad = validate_media_upload(media_file)
+                if bad:
+                    return JsonResponse({"error": bad}, status=400)
                 ctype = (getattr(media_file, 'content_type', '') or '').lower()
                 media_type = 'video' if ctype.startswith('video') else 'image'
                 try:

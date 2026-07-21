@@ -10,9 +10,19 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY
-SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-prod')
-
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
+
+SECRET_KEY = os.environ.get('SECRET_KEY')
+if not SECRET_KEY:
+    if DEBUG:
+        SECRET_KEY = 'dev-secret-key-change-in-prod'
+    else:
+        # Silently falling back to a well-known string in production would let
+        # anyone forge valid JWTs/session data — a misconfigured deploy must
+        # fail loudly instead of degrading into a spoofable secret.
+        raise RuntimeError(
+            'SECRET_KEY environment variable must be set when DEBUG=False.'
+        )
 
 ALLOWED_HOSTS = [
     host.strip()

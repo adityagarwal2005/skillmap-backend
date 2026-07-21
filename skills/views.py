@@ -8,6 +8,13 @@ import math
 
 def add_category(request):
     if request.method == "POST":
+        # Not called anywhere by the frontend — categories are seeded/managed
+        # via the admin. It had no auth check at all, so anyone could spam
+        # arbitrary rows into this table; require login at minimum.
+        user, error = get_user_from_token(request)
+        if error:
+            return error
+
         name = request.POST.get("name", "").strip()
         if not name:
             return JsonResponse({"error": "Category name is required"}, status=400)
