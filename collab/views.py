@@ -79,6 +79,12 @@ def create_collab_post(request):
                 return JsonResponse({"error": f"Invalid skills: {', '.join(invalid)}"}, status=400)
             post.skills_needed.set(skill_objects)
 
+            from notifications.utils import notify_category_match
+            notify_category_match(
+                skill_objects, user, 'collab_match',
+                f"New collab matching your category: {title[:60]}"
+            )
+
         return JsonResponse({
             "message": "Collab post created",
             "post_id": post.id,
@@ -306,15 +312,20 @@ def respond_to_collab_request(request, request_id):
             notify(collab_request.applicant, ntype,
                    f"{user.username} {status} your collab application", actor=user)
 
-            # if accepted, create a conversation
+            # If accepted, add them to the ONE shared group thread for this
+            # collab post (get-or-create it on the first acceptance) —
+            # previously every acceptance spun up its own separate 1:1 with
+            # the owner, so an accepted team could never actually talk to
+            # each other, only individually to the post owner.
             if status == 'accepted':
                 from work.models import Conversation
-                conversation = Conversation.objects.create(
-                    conversation_type='work'
+                conversation, _ = Conversation.objects.get_or_create(
+                    collab_post=collab_request.collab_post,
+                    defaults={'conversation_type': 'collab'},
                 )
                 conversation.participants.add(user, collab_request.applicant)
                 return JsonResponse({
-                    "message": f"Request accepted — conversation started",
+                    "message": "Request accepted — conversation started",
                     "conversation_id": conversation.id
                 })
 

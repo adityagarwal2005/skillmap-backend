@@ -16,6 +16,7 @@ class Notification(models.Model):
         ('job_complete', 'Job Complete'),
         ('friend_request', 'Friend Request'),
         ('friend_accepted', 'Friend Accepted'),
+        ('collab_match', 'Collab Match'),
     ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')

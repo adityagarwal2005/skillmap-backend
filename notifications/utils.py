@@ -60,3 +60,41 @@ def notify(recipient, notification_type, message, actor=None):
         pass
     # Push is fully isolated — its own try/except inside.
     send_web_push(recipient, 'SkillMap', message, url='/notifications')
+
+
+# Cap how many people a single post can fan out to — a popular category
+# shouldn't turn one post into a notification storm.
+MATCHING_NOTIFY_CAP = 200
+
+
+def notify_category_match(skill_objects, poster, notification_type, message):
+    """Notify users whose profile category matches one of a new post's
+    required/needed skills' categories. This is the 'matching jobs' feature
+    Settings already advertises ("Get pinged for messages, applications, and
+    matching jobs") but that had zero backend support until now — every new
+    freelance job or collab post silently reached nobody but people already
+    browsing the feed.
+
+    Best-effort and fully isolated: never lets a bad match-notify run block
+    the post itself from being created.
+    """
+    try:
+        from users.models import User, Block
+
+        category_ids = {s.category_id for s in skill_objects if s.category_id}
+        if not category_ids:
+            return
+
+        blocked = set(Block.objects.filter(blocker=poster).values_list('blocked_id', flat=True))
+        blocked_by = set(Block.objects.filter(blocked=poster).values_list('blocker_id', flat=True))
+        hidden = blocked | blocked_by
+
+        matches = (
+            User.objects.filter(category_id__in=category_ids)
+            .exclude(id=poster.id)
+            .exclude(id__in=hidden)[:MATCHING_NOTIFY_CAP]
+        )
+        for u in matches:
+            notify(u, notification_type, message, actor=None)
+    except Exception:
+        pass

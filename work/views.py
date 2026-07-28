@@ -96,6 +96,12 @@ def create_work_request(request):
         )
         work_request.required_skills.set(skill_objects)
 
+        from notifications.utils import notify_category_match
+        notify_category_match(
+            skill_objects, user, 'work_request',
+            f"New freelance job matching your category: {description[:60]}"
+        )
+
         return JsonResponse({
             "message": "Work request created",
             "work_request_id": work_request.id,
@@ -583,11 +589,11 @@ def send_message(request, conversation_id):
 
             from django.db.models import Q
             from users.models import Block
-            other = conversation.participants.exclude(id=user.id).first()
-            if other and Block.objects.filter(
-                Q(blocker=user, blocked=other) | Q(blocker=other, blocked=user)
+            others = list(conversation.participants.exclude(id=user.id))
+            if others and Block.objects.filter(
+                Q(blocker=user, blocked__in=others) | Q(blocker__in=others, blocked=user)
             ).exists():
-                return JsonResponse({"error": "You can't message this user"}, status=403)
+                return JsonResponse({"error": "You can't message in this conversation"}, status=403)
 
             text = request.POST.get("text", "").strip()
             media_file = request.FILES.get("media")
@@ -627,7 +633,8 @@ def send_message(request, conversation_id):
 
             from notifications.utils import notify
             preview = text or ('sent a video' if media_type == 'video' else 'sent a photo')
-            notify(other, 'message', f"{user.username}: {preview[:40]}", actor=user)
+            for other in others:
+                notify(other, 'message', f"{user.username}: {preview[:40]}", actor=user)
 
             return JsonResponse({
                 "message": "Message sent",
@@ -749,23 +756,43 @@ def get_my_conversations(request):
 
         conversations = Conversation.objects.filter(
             participants=user
-        ).prefetch_related("participants", "messages")
+        ).select_related("collab_post").prefetch_related("participants", "messages")
 
         data = []
         for c in conversations:
-            other = c.participants.exclude(id=user.id).first()
             last_message = c.messages.order_by("-created_at").first()
             activity_at = last_message.created_at if last_message else c.created_at
-            data.append({
-                "id": c.id,
-                "type": c.conversation_type,
-                "with": other.username if other else None,
-                "with_id": other.id if other else None,
-                "with_avatar": request.build_absolute_uri(other.profile_image.url) if other and other.profile_image else None,
-                "last_message": last_message.text if last_message else None,
-                "last_message_at": str(last_message.created_at) if last_message else None,
-                "_activity_at": activity_at,
-            })
+            others = list(c.participants.exclude(id=user.id))
+
+            # A collab-team thread has an owner + every accepted applicant —
+            # picking "the other participant" like the 1:1 cases below would
+            # just show one arbitrary teammate and hide everyone else.
+            if c.conversation_type == 'collab':
+                entry = {
+                    "id": c.id,
+                    "type": c.conversation_type,
+                    "is_group": True,
+                    "with": c.collab_post.title if c.collab_post else "Collab team",
+                    "with_id": None,
+                    "with_avatar": None,
+                    "participants": [{"id": o.id, "username": o.username} for o in others],
+                    "participant_count": len(others) + 1,
+                }
+            else:
+                other = others[0] if others else None
+                entry = {
+                    "id": c.id,
+                    "type": c.conversation_type,
+                    "is_group": False,
+                    "with": other.username if other else None,
+                    "with_id": other.id if other else None,
+                    "with_avatar": request.build_absolute_uri(other.profile_image.url) if other and other.profile_image else None,
+                }
+
+            entry["last_message"] = last_message.text if last_message else None
+            entry["last_message_at"] = str(last_message.created_at) if last_message else None
+            entry["_activity_at"] = activity_at
+            data.append(entry)
 
         # Most recently active conversation first — otherwise a chat from
         # weeks ago could sit above one with a message from 5 minutes ago.

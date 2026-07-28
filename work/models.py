@@ -78,11 +78,19 @@ class Conversation(models.Model):
         ('freelance', 'Freelance'),
         ('work', 'Work'),
         ('direct', 'Direct'),
+        ('collab', 'Collab'),
     ]
 
     participants = models.ManyToManyField(User, related_name='conversations')
     work_request = models.OneToOneField(
         WorkRequest, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='conversation'
+    )
+    # One shared group thread per collab post — every applicant the owner
+    # accepts joins the SAME conversation, instead of each getting their own
+    # separate 1:1 with the owner and no way to talk to each other.
+    collab_post = models.OneToOneField(
+        'collab.CollabPost', on_delete=models.SET_NULL,
         null=True, blank=True, related_name='conversation'
     )
     conversation_type = models.CharField(max_length=10, choices=TYPE_CHOICES)
