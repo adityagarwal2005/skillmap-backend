@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Category, Skill, Tag, UserSkill, Certificate
+from .models import Category, Skill, Tag, UserSkill
 
 
 @admin.register(Category)
@@ -17,4 +17,3 @@ class SkillAdmin(admin.ModelAdmin):
 
 admin.site.register(Tag)
 admin.site.register(UserSkill)
-admin.site.register(Certificate)

@@ -1,6 +1,6 @@
 from django.http import JsonResponse
 from django.db.models import Q
-from .models import Category, Skill, UserSkill, Certificate
+from .models import Category, Skill, UserSkill
 from users.models import User
 from users.views import get_user_from_token
 import math
@@ -97,73 +97,3 @@ def remove_skill(request, user_id):
     return JsonResponse({"error": "Method not allowed"}, status=405)
 
 
-def add_certificate(request):
-    if request.method == "POST":
-        user, error = get_user_from_token(request)
-        if error:
-            return error
-
-        title = request.POST.get("title", "").strip()
-        issued_by = request.POST.get("issued_by", "").strip()
-        issued_date = request.POST.get("issued_date", "").strip()
-        certificate_url = request.POST.get("certificate_url", "").strip()
-        image = request.FILES.get("image")
-
-        if not title or not issued_by:
-            return JsonResponse({"error": "Title and issued_by are required"}, status=400)
-
-        certificate = Certificate.objects.create(
-            user=user,
-            title=title,
-            issued_by=issued_by,
-            issued_date=issued_date if issued_date else None,
-            certificate_url=certificate_url if certificate_url else None,
-            image=image if image else None,
-        )
-        return JsonResponse({
-            "message": "Certificate added",
-            "certificate_id": certificate.id,
-            "image_url": request.build_absolute_uri(certificate.image.url) if certificate.image else None,
-        }, status=201)
-
-    return JsonResponse({"error": "Method not allowed"}, status=405)
-
-
-def remove_certificate(request, certificate_id):
-    if request.method == "DELETE":
-        user, error = get_user_from_token(request)
-        if error:
-            return error
-
-        try:
-            certificate = Certificate.objects.get(id=certificate_id, user=user)
-            certificate.delete()
-            return JsonResponse({"message": "Certificate removed"})
-        except Certificate.DoesNotExist:
-            return JsonResponse({"error": "Certificate not found or not yours"}, status=404)
-
-    return JsonResponse({"error": "Method not allowed"}, status=405)
-
-
-def show_certificates(request, user_id):
-    if request.method == "GET":
-        try:
-            user = User.objects.get(id=user_id)
-            certificates = Certificate.objects.filter(user=user)
-            data = [
-                {
-                    "id": c.id,
-                    "title": c.title,
-                    "issued_by": c.issued_by,
-                    "issued_date": c.issued_date,
-                    "certificate_url": c.certificate_url,
-                    "image_url": request.build_absolute_uri(c.image.url) if c.image else None,
-                    "created_at": c.created_at,
-                }
-                for c in certificates
-            ]
-            return JsonResponse({"certificates": data})
-        except User.DoesNotExist:
-            return JsonResponse({"error": "User not found"}, status=404)
-
-    return JsonResponse({"error": "Method not allowed"}, status=405)

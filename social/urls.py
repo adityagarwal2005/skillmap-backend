@@ -75,11 +75,6 @@ urlpatterns = [
     path("users/<int:user_id>/skills/add/", csrf_exempt(skill_views.add_skill)),
     path("users/<int:user_id>/skills/remove/", csrf_exempt(skill_views.remove_skill)),
 
-    # Certificates
-    path("certificates/add/", csrf_exempt(skill_views.add_certificate)),
-    path("certificates/<int:certificate_id>/remove/", csrf_exempt(skill_views.remove_certificate)),
-    path("users/<int:user_id>/certificates/", csrf_exempt(skill_views.show_certificates)),
-
     # Categories
     path("categories/", csrf_exempt(skill_views.show_categories)),
     path("categories/add/", csrf_exempt(skill_views.add_category)),
