@@ -55,6 +55,7 @@ urlpatterns = [
     path("users/<int:user_id>/friend/remove/", csrf_exempt(user_views.remove_friend)),
 
     path("users/<int:user_id>/endorse/", csrf_exempt(user_views.endorse_skill)),
+    path("users/by-username/<str:username>/", csrf_exempt(user_views.get_user_by_username)),
     path("users/<int:user_id>/", csrf_exempt(user_views.get_user)),
     path("users/<int:user_id>/edit/", csrf_exempt(user_views.edit_user)),
     path("users/<int:user_id>/change-password/", csrf_exempt(user_views.change_password)),

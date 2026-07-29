@@ -791,6 +791,20 @@ def _safe_review_count(user):
         return 0
 
 
+def get_user_by_username(request, username):
+    """Resolve a username to the same public-safe profile payload as
+    get_user — lets a shareable profile link read like /u/<username>
+    instead of a raw numeric ID, without duplicating any of that view's
+    logic (view-count, skills, endorsements, safe email gating, etc)."""
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    try:
+        user = User.objects.get(username__iexact=username)
+    except User.DoesNotExist:
+        return JsonResponse({"error": "User not found"}, status=404)
+    return get_user(request, user.id)
+
+
 def get_user(request, user_id):
     if request.method == "GET":
         from django.db.models import F, Count
