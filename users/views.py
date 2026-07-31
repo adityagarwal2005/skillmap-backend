@@ -805,9 +805,46 @@ def get_user_by_username(request, username):
     return get_user(request, user.id)
 
 
+def _has_worked_together(a, b):
+    """True if a and b have an actual accepted/completed work or collab
+    relationship — not just a click. Used to tell a verified endorsement
+    (from someone who's actually worked with this person) apart from a
+    random '+', which every endorsement currently looks identical to."""
+    from django.db.models import Q
+    from work.models import WorkRequest, WorkProposal
+    from collab.models import CollabRequest
+
+    if WorkRequest.objects.filter(
+        Q(created_by=a, assigned_to=b) | Q(created_by=b, assigned_to=a),
+        status__in=['assigned', 'closed'],
+    ).exists():
+        return True
+    if WorkProposal.objects.filter(
+        Q(sender=a, receiver=b) | Q(sender=b, receiver=a), status='accepted',
+    ).exists():
+        return True
+    if CollabRequest.objects.filter(
+        Q(collab_post__user=a, applicant=b) | Q(collab_post__user=b, applicant=a),
+        status='accepted',
+    ).exists():
+        return True
+    return False
+
+
+def _friend_ids(user):
+    from django.db.models import Q
+    friendships = Friendship.objects.filter(
+        Q(requester=user) | Q(receiver=user), status='accepted'
+    )
+    return {
+        (f.receiver_id if f.requester_id == user.id else f.requester_id)
+        for f in friendships
+    }
+
+
 def get_user(request, user_id):
     if request.method == "GET":
-        from django.db.models import F, Count
+        from django.db.models import F
         try:
             user = User.objects.get(id=user_id)
 
@@ -817,12 +854,29 @@ def get_user(request, user_id):
                 User.objects.filter(id=user.id).update(profile_views=F('profile_views') + 1)
                 user.profile_views += 1
 
-            # Endorsement counts per skill + whether the viewer endorsed each.
-            counts = {
-                row['skill']: row['n']
-                for row in SkillEndorsement.objects.filter(user=user)
-                .values('skill').annotate(n=Count('id'))
+            # Endorsement counts per skill, which are "verified" (from
+            # someone who actually worked with this person — real trust
+            # signal, not a number anyone can inflate with a random click),
+            # and whether the viewer endorsed each.
+            endorsements_qs = SkillEndorsement.objects.filter(user=user).select_related('endorser')
+            counts = {}
+            by_skill_endorsers = {}
+            for e in endorsements_qs:
+                counts[e.skill] = counts.get(e.skill, 0) + 1
+                by_skill_endorsers.setdefault(e.skill, []).append(e.endorser)
+
+            worked_with_cache = {}
+
+            def _worked_with(other):
+                if other.id not in worked_with_cache:
+                    worked_with_cache[other.id] = _has_worked_together(user, other)
+                return worked_with_cache[other.id]
+
+            verified_counts = {
+                skill: sum(1 for e in endorsers if _worked_with(e))
+                for skill, endorsers in by_skill_endorsers.items()
             }
+
             my_endorsements = set()
             if viewer and viewer.id != user.id:
                 my_endorsements = set(
@@ -832,8 +886,16 @@ def get_user(request, user_id):
             skills = [{
                 'name': s.name,
                 'endorsements': counts.get(s.name, 0),
+                'verified_endorsements': verified_counts.get(s.name, 0),
                 'endorsed_by_me': s.name in my_endorsements,
             } for s in user.skills.all()]
+
+            # Mutual friends — a real trust signal on a stranger's profile
+            # ("2 people you know are friends with them") using the
+            # friendship graph that already exists.
+            mutual_friends_count = 0
+            if viewer and viewer.id != user.id:
+                mutual_friends_count = len(_friend_ids(viewer) & _friend_ids(user))
 
             is_self = bool(viewer and viewer.id == user.id)
             return JsonResponse({
@@ -868,6 +930,7 @@ def get_user(request, user_id):
                     else friend_state(viewer, user) if viewer
                     else 'none'
                 ),
+                "mutual_friends_count": mutual_friends_count,
             })
         except User.DoesNotExist:
             return JsonResponse({"error": "User not found"}, status=404)
