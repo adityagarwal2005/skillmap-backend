@@ -52,3 +52,25 @@ class CollabRequest(models.Model):
 
     def __str__(self):
         return f"{self.applicant.username} → {self.collab_post.title} - {self.status}"
+
+
+class CollabTask(models.Model):
+    """A lightweight shared task board per collab post — the difference
+    between 'a listing with a chat bolted on' and a place a team actually
+    coordinates work. One board per post, visible to the owner + every
+    accepted applicant (the same group who share the collab conversation)."""
+    collab_post = models.ForeignKey(CollabPost, on_delete=models.CASCADE, related_name='tasks')
+    title = models.CharField(max_length=200)
+    assignee = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='assigned_collab_tasks'
+    )
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_collab_tasks')
+    is_done = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['is_done', '-created_at']
+
+    def __str__(self):
+        return f"{self.collab_post.title}: {self.title}"

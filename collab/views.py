@@ -1,6 +1,6 @@
 from django.http import JsonResponse
 from django.utils import timezone
-from .models import CollabPost, CollabRequest
+from .models import CollabPost, CollabRequest, CollabTask
 from users.models import User
 from skills.models import Skill
 from users.views import get_user_from_token, require_contact
@@ -353,3 +353,164 @@ def close_collab_post(request, post_id):
             return JsonResponse({"error": "Post not found or not yours"}, status=404)
 
     return JsonResponse({"error": "Method not allowed"}, status=405)
+
+
+def _is_collab_participant(collab_post, user):
+    """Owner or an accepted applicant — the same group that shares the
+    collab conversation, and the only people allowed to see/use its task
+    board."""
+    if collab_post.user_id == user.id:
+        return True
+    return CollabRequest.objects.filter(
+        collab_post=collab_post, applicant=user, status='accepted'
+    ).exists()
+
+
+def get_collab_tasks(request, post_id):
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    user, error = get_user_from_request(request)
+    if error:
+        return error
+
+    try:
+        post = CollabPost.objects.get(id=post_id)
+    except CollabPost.DoesNotExist:
+        return JsonResponse({"error": "Collab post not found"}, status=404)
+
+    if not _is_collab_participant(post, user):
+        return JsonResponse({"error": "You're not part of this collab"}, status=403)
+
+    tasks = post.tasks.select_related('assignee', 'created_by')
+    data = [{
+        "id": t.id,
+        "title": t.title,
+        "is_done": t.is_done,
+        "assignee_id": t.assignee_id,
+        "assignee_username": t.assignee.username if t.assignee else None,
+        "created_by_id": t.created_by_id,
+        "created_by_username": t.created_by.username,
+        "created_at": str(t.created_at),
+    } for t in tasks]
+    return JsonResponse({"tasks": data, "count": len(data)})
+
+
+def create_collab_task(request, post_id):
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    user, error = get_user_from_request(request)
+    if error:
+        return error
+
+    try:
+        post = CollabPost.objects.get(id=post_id)
+    except CollabPost.DoesNotExist:
+        return JsonResponse({"error": "Collab post not found"}, status=404)
+
+    if not _is_collab_participant(post, user):
+        return JsonResponse({"error": "You're not part of this collab"}, status=403)
+
+    title = request.POST.get("title", "").strip()
+    if not title:
+        return JsonResponse({"error": "Task title is required"}, status=400)
+    if len(title) > 200:
+        return JsonResponse({"error": "Task title is too long"}, status=400)
+
+    assignee_id = request.POST.get("assignee_id", "").strip()
+    assignee = None
+    if assignee_id:
+        try:
+            candidate = User.objects.get(id=assignee_id)
+        except User.DoesNotExist:
+            return JsonResponse({"error": "Assignee not found"}, status=404)
+        if not _is_collab_participant(post, candidate):
+            return JsonResponse({"error": "Assignee must be part of this collab"}, status=400)
+        assignee = candidate
+
+    task = CollabTask.objects.create(
+        collab_post=post, title=title, assignee=assignee, created_by=user,
+    )
+    return JsonResponse({"message": "Task created", "task_id": task.id}, status=201)
+
+
+def toggle_collab_task(request, task_id):
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    user, error = get_user_from_request(request)
+    if error:
+        return error
+
+    try:
+        task = CollabTask.objects.select_related('collab_post').get(id=task_id)
+    except CollabTask.DoesNotExist:
+        return JsonResponse({"error": "Task not found"}, status=404)
+
+    if not _is_collab_participant(task.collab_post, user):
+        return JsonResponse({"error": "You're not part of this collab"}, status=403)
+
+    task.is_done = not task.is_done
+    task.save()
+    return JsonResponse({"message": "Task updated", "is_done": task.is_done})
+
+
+def assign_collab_task(request, task_id):
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    user, error = get_user_from_request(request)
+    if error:
+        return error
+
+    try:
+        task = CollabTask.objects.select_related('collab_post').get(id=task_id)
+    except CollabTask.DoesNotExist:
+        return JsonResponse({"error": "Task not found"}, status=404)
+
+    if not _is_collab_participant(task.collab_post, user):
+        return JsonResponse({"error": "You're not part of this collab"}, status=403)
+
+    assignee_id = request.POST.get("assignee_id", "").strip()
+    if not assignee_id:
+        task.assignee = None
+        task.save()
+        return JsonResponse({"message": "Task unassigned"})
+
+    try:
+        candidate = User.objects.get(id=assignee_id)
+    except User.DoesNotExist:
+        return JsonResponse({"error": "Assignee not found"}, status=404)
+    if not _is_collab_participant(task.collab_post, candidate):
+        return JsonResponse({"error": "Assignee must be part of this collab"}, status=400)
+
+    task.assignee = candidate
+    task.save()
+    return JsonResponse({
+        "message": "Task assigned",
+        "assignee_id": candidate.id,
+        "assignee_username": candidate.username,
+    })
+
+
+def delete_collab_task(request, task_id):
+    if request.method != "DELETE":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    user, error = get_user_from_request(request)
+    if error:
+        return error
+
+    try:
+        task = CollabTask.objects.select_related('collab_post').get(id=task_id)
+    except CollabTask.DoesNotExist:
+        return JsonResponse({"error": "Task not found"}, status=404)
+
+    # Any participant can create/toggle/assign, but deletion is a bit more
+    # destructive so it's scoped tighter — task creator or the collab owner.
+    if task.created_by_id != user.id and task.collab_post.user_id != user.id:
+        return JsonResponse({"error": "Only the task creator or collab owner can delete this"}, status=403)
+
+    task.delete()
+    return JsonResponse({"message": "Task deleted"})

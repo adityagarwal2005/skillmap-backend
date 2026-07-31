@@ -775,6 +775,7 @@ def get_my_conversations(request):
                     "with": c.collab_post.title if c.collab_post else "Collab team",
                     "with_id": None,
                     "with_avatar": None,
+                    "collab_post_id": c.collab_post_id,
                     "participants": [{"id": o.id, "username": o.username} for o in others],
                     "participant_count": len(others) + 1,
                 }
