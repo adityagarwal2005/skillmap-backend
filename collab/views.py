@@ -108,11 +108,20 @@ def show_collab_posts(request):
     longitude    = request.GET.get('longitude')
 
     from users.models import Block
+    from django.db.models import Count
     blocked = set(Block.objects.filter(blocker=user).values_list('blocked_id', flat=True))
     blocked_by = set(Block.objects.filter(blocked=user).values_list('blocker_id', flat=True))
     hidden = blocked | blocked_by
 
-    posts = CollabPost.objects.filter(status='open')
+    # select_related/prefetch_related + annotate so the loop below doesn't
+    # issue a fresh query per post for the owner's username, skills list,
+    # and applicant count (was N+1 across the whole open-posts table).
+    posts = (
+        CollabPost.objects.filter(status='open')
+        .select_related('user')
+        .prefetch_related('skills_needed')
+        .annotate(applicants_count=Count('requests', distinct=True))
+    )
 
     results = []
     for post in posts:
@@ -156,7 +165,7 @@ def show_collab_posts(request):
             'status':       post.status,
             'posted_by':    post.user.username,
             'skills_needed':[s.name for s in post.skills_needed.all()],
-            'applicants':   post.requests.count() if hasattr(post, 'requests') else 0,
+            'applicants':   post.applicants_count,
             'distance_km':  dist_display,
             'media':        post.media or None,
             'media_type':   post.media_type or None,
@@ -260,7 +269,7 @@ def get_collab_applicants(request, post_id):
             post = CollabPost.objects.get(id=post_id, user=user)
             applicants = CollabRequest.objects.filter(
                 collab_post=post
-            ).select_related("applicant")
+            ).select_related("applicant").prefetch_related("applicant__skills")
 
             data = [
                 {

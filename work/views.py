@@ -776,6 +776,7 @@ def get_my_conversations(request):
                     "with_id": None,
                     "with_avatar": None,
                     "collab_post_id": c.collab_post_id,
+                    "is_collab_owner": bool(c.collab_post and c.collab_post.user_id == user.id),
                     "participants": [{"id": o.id, "username": o.username} for o in others],
                     "participant_count": len(others) + 1,
                 }

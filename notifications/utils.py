@@ -67,6 +67,25 @@ def notify(recipient, notification_type, message, actor=None):
 MATCHING_NOTIFY_CAP = 200
 
 
+def _notify_category_match_sync(category_ids, poster_id, notification_type, message):
+    try:
+        from users.models import User, Block
+
+        blocked = set(Block.objects.filter(blocker_id=poster_id).values_list('blocked_id', flat=True))
+        blocked_by = set(Block.objects.filter(blocked_id=poster_id).values_list('blocker_id', flat=True))
+        hidden = blocked | blocked_by
+
+        matches = (
+            User.objects.filter(category_id__in=category_ids)
+            .exclude(id=poster_id)
+            .exclude(id__in=hidden)[:MATCHING_NOTIFY_CAP]
+        )
+        for u in matches:
+            notify(u, notification_type, message, actor=None)
+    except Exception:
+        pass
+
+
 def notify_category_match(skill_objects, poster, notification_type, message):
     """Notify users whose profile category matches one of a new post's
     required/needed skills' categories. This is the 'matching jobs' feature
@@ -75,26 +94,20 @@ def notify_category_match(skill_objects, poster, notification_type, message):
     freelance job or collab post silently reached nobody but people already
     browsing the feed.
 
-    Best-effort and fully isolated: never lets a bad match-notify run block
-    the post itself from being created.
+    Runs in a background thread — up to MATCHING_NOTIFY_CAP recipients, each
+    a notify() call that can itself do a blocking web-push request per
+    device, so doing this inline would make posting a job noticeably slower
+    (or risk a timeout) in exactly the case where it worked best: a
+    popular category with lots of matching people. Same pattern already
+    used for OTP emails elsewhere in this file's neighborhood.
     """
-    try:
-        from users.models import User, Block
-
-        category_ids = {s.category_id for s in skill_objects if s.category_id}
-        if not category_ids:
-            return
-
-        blocked = set(Block.objects.filter(blocker=poster).values_list('blocked_id', flat=True))
-        blocked_by = set(Block.objects.filter(blocked=poster).values_list('blocker_id', flat=True))
-        hidden = blocked | blocked_by
-
-        matches = (
-            User.objects.filter(category_id__in=category_ids)
-            .exclude(id=poster.id)
-            .exclude(id__in=hidden)[:MATCHING_NOTIFY_CAP]
-        )
-        for u in matches:
-            notify(u, notification_type, message, actor=None)
-    except Exception:
-        pass
+    category_ids = {s.category_id for s in skill_objects if s.category_id}
+    if not category_ids:
+        return
+    import threading
+    thread = threading.Thread(
+        target=_notify_category_match_sync,
+        args=(category_ids, poster.id, notification_type, message),
+    )
+    thread.daemon = True
+    thread.start()
