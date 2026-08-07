@@ -1,7 +1,7 @@
 from django.http import JsonResponse
 from django.utils import timezone
 from datetime import timedelta
-from .models import WorkRequest, WorkRequestResponse, WorkProposal, Conversation, Message
+from .models import WorkRequest, WorkRequestResponse, WorkProposal, Conversation, Message, TypingStatus
 from users.models import User
 from skills.models import Skill, Category
 from users.views import get_user_from_token, require_contact
@@ -662,6 +662,12 @@ def get_messages(request, conversation_id):
             if not conversation.participants.filter(id=user.id).exists():
                 return JsonResponse({"error": "You are not part of this conversation"}, status=403)
 
+            # Mark anything sent TO this user as read now that they're
+            # viewing the thread — powers the "seen" tick for the sender.
+            Message.objects.filter(
+                conversation=conversation, read_at__isnull=True
+            ).exclude(sender=user).update(read_at=timezone.now())
+
             messages = Message.objects.filter(
                 conversation=conversation
             ).select_related("sender").order_by("created_at")
@@ -675,10 +681,41 @@ def get_messages(request, conversation_id):
                     "media_url": m.media or None,
                     "media_type": m.media_type or None,
                     "created_at": str(m.created_at),
+                    "read_at": str(m.read_at) if m.read_at else None,
                 }
                 for m in messages
             ]
-            return JsonResponse({"messages": data, "count": len(data)})
+
+            # Typing indicator — anyone else in this conversation who pinged
+            # the typing endpoint in the last 4 seconds (frontend pings every
+            # ~2s while the user is actively typing).
+            typing_cutoff = timezone.now() - timedelta(seconds=4)
+            typing_users = list(
+                TypingStatus.objects.filter(conversation=conversation, updated_at__gte=typing_cutoff)
+                .exclude(user=user).values_list('user__username', flat=True)
+            )
+
+            return JsonResponse({"messages": data, "count": len(data), "typing_users": typing_users})
+
+        except Conversation.DoesNotExist:
+            return JsonResponse({"error": "Conversation not found"}, status=404)
+
+    return JsonResponse({"error": "Method not allowed"}, status=405)
+
+
+def set_typing(request, conversation_id):
+    if request.method == "POST":
+        user, error = get_user_from_request(request)
+        if error:
+            return error
+
+        try:
+            conversation = Conversation.objects.get(id=conversation_id)
+            if not conversation.participants.filter(id=user.id).exists():
+                return JsonResponse({"error": "You are not part of this conversation"}, status=403)
+
+            TypingStatus.objects.update_or_create(conversation=conversation, user=user)
+            return JsonResponse({"ok": True})
 
         except Conversation.DoesNotExist:
             return JsonResponse({"error": "Conversation not found"}, status=404)

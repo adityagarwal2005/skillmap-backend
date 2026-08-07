@@ -109,6 +109,20 @@ class Message(models.Model):
     media = models.CharField(max_length=500, blank=True, default='')   # Cloudinary URL
     media_type = models.CharField(max_length=10, choices=MEDIA_TYPE_CHOICES, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True, null=True)
+    read_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"{self.sender.username}: {self.text[:30]}"
+
+
+class TypingStatus(models.Model):
+    """Ephemeral 'X is typing…' signal. Rows are upserted (one per user per
+    conversation) rather than appended, so the table stays bounded — the
+    poll-based recency check (updated_at within the last few seconds) is what
+    makes the indicator disappear, not row deletion."""
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name='typing_statuses')
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [["conversation", "user"]]

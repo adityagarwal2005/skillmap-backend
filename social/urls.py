@@ -121,6 +121,7 @@ urlpatterns = [
     path("conversations/start/<int:user_id>/", csrf_exempt(work_views.start_conversation)),
     path("conversations/<int:conversation_id>/send/", csrf_exempt(work_views.send_message)),
     path("conversations/<int:conversation_id>/messages/", csrf_exempt(work_views.get_messages)),
+    path("conversations/<int:conversation_id>/typing/", csrf_exempt(work_views.set_typing)),
 
     # Notifications
     path("notifications/", csrf_exempt(notification_views.get_my_notifications)),
