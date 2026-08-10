@@ -15,10 +15,18 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
+from django.http import JsonResponse
 from django.urls import path
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
 from django.conf.urls.static import static
+
+
+def health_check(request):
+    # No DB/auth touched — just proves the process is up, so an uptime
+    # monitor pinging this every few minutes keeps Render's free tier from
+    # spinning down without wasting a real query on every ping.
+    return JsonResponse({"status": "ok"})
 
 from users import views as user_views
 from skills import views as skill_views
@@ -30,6 +38,7 @@ from feed import views as feed_views
 from collab import views as collab_views
 
 urlpatterns = [
+    path("health/", health_check),
     path("admin/", admin.site.urls),
 
     # Auth
