@@ -1,4 +1,5 @@
 from django.http import JsonResponse
+from django.db.models import Prefetch
 from django.utils import timezone
 from datetime import timedelta
 from .models import WorkRequest, WorkRequestResponse, WorkProposal, Conversation, Message, TypingStatus
@@ -791,13 +792,21 @@ def get_my_conversations(request):
         if error:
             return error
 
+        # Chaining .order_by() onto a plain prefetch_related("messages") would
+        # bypass Django's prefetch cache and issue a fresh query per
+        # conversation for the "last message" lookup below — a real N+1 that
+        # matters now that this endpoint is polled every 5s. Prefetch with an
+        # explicit ordering so it's fetched once, grouped by conversation.
         conversations = Conversation.objects.filter(
             participants=user
-        ).select_related("collab_post").prefetch_related("participants", "messages")
+        ).select_related("collab_post").prefetch_related(
+            "participants",
+            Prefetch("messages", queryset=Message.objects.order_by("-created_at"), to_attr="_ordered_messages"),
+        )
 
         data = []
         for c in conversations:
-            last_message = c.messages.order_by("-created_at").first()
+            last_message = c._ordered_messages[0] if c._ordered_messages else None
             activity_at = last_message.created_at if last_message else c.created_at
             others = list(c.participants.exclude(id=user.id))
 

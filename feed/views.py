@@ -1,5 +1,5 @@
 from django.http import JsonResponse
-from django.db.models import Q
+from django.db.models import Q, Count
 from users.models import User, Block
 from skills.models import Skill, Tag
 from users.views import get_user_from_token
@@ -111,6 +111,12 @@ def _feed_user(u, request):
 
 
 def _job_item(wr, request, distance=None):
+    # responses_count comes from an .annotate() on the queryset when present
+    # (smart_feed/trending_feed) — falls back to a live count only if called
+    # from somewhere that didn't annotate it.
+    count = getattr(wr, 'responses_count', None)
+    if count is None:
+        count = wr.responses.count()
     return {
         'kind': 'freelance',
         'id': wr.id,
@@ -120,7 +126,7 @@ def _job_item(wr, request, distance=None):
         'created_at': str(wr.created_at) if wr.created_at else None,
         'payment_amount': wr.payment_amount,
         'time_limit_hours': wr.time_limit_hours,
-        'responses_count': wr.responses.count(),
+        'responses_count': count,
         'distance_km': distance,
         'media': wr.media or None,
         'media_type': wr.media_type or None,
@@ -129,6 +135,9 @@ def _job_item(wr, request, distance=None):
 
 
 def _collab_item(cp, request, distance=None):
+    count = getattr(cp, 'applicants_count', None)
+    if count is None:
+        count = cp.requests.count() if hasattr(cp, 'requests') else 0
     return {
         'kind': 'collab',
         'id': cp.id,
@@ -137,7 +146,7 @@ def _collab_item(cp, request, distance=None):
         'skills': [s.name for s in cp.skills_needed.all()],
         'created_at': str(cp.created_at) if cp.created_at else None,
         'collab_type': cp.collab_type,
-        'applicants': cp.requests.count() if hasattr(cp, 'requests') else 0,
+        'applicants': count,
         'distance_km': distance,
         'media': cp.media or None,
         'media_type': cp.media_type or None,
@@ -167,7 +176,14 @@ def smart_feed(request):
 
     scored = []  # (score, created_at, kind, obj)
 
-    for wr in WorkRequest.objects.filter(status='open').exclude(created_by=user).exclude(created_by_id__in=blocked):
+    open_jobs = (
+        WorkRequest.objects.filter(status='open')
+        .exclude(created_by=user).exclude(created_by_id__in=blocked)
+        .select_related('created_by', 'created_by__category')
+        .prefetch_related('required_skills')
+        .annotate(responses_count=Count('responses', distinct=True))
+    )
+    for wr in open_jobs:
         sk = {s.name.lower() for s in wr.required_skills.all()}
         score = 2 * len(user_skills & sk)
         if cat_id and wr.created_by.category_id == cat_id:
@@ -176,7 +192,14 @@ def smart_feed(request):
             score = 1
         scored.append((score, wr.created_at, 'j', wr))
 
-    for cp in CollabPost.objects.filter(status='open').exclude(user=user).exclude(user_id__in=blocked):
+    open_collabs = (
+        CollabPost.objects.filter(status='open')
+        .exclude(user=user).exclude(user_id__in=blocked)
+        .select_related('user', 'user__category')
+        .prefetch_related('skills_needed')
+        .annotate(applicants_count=Count('requests', distinct=True))
+    )
+    for cp in open_collabs:
         sk = {s.name.lower() for s in cp.skills_needed.all()}
         score = 2 * len(user_skills & sk)
         if cat_id and cp.user.category_id == cat_id:
@@ -276,23 +299,36 @@ def trending_feed(request):
 
     entries = []  # (distance_or_None, popularity, created_at, kind, obj)
 
-    for wr in WorkRequest.objects.filter(status='open').exclude(created_by=user).exclude(created_by_id__in=blocked):
+    open_jobs = (
+        WorkRequest.objects.filter(status='open')
+        .exclude(created_by=user).exclude(created_by_id__in=blocked)
+        .select_related('created_by', 'created_by__category')
+        .prefetch_related('required_skills')
+        .annotate(responses_count=Count('responses', distinct=True))
+    )
+    for wr in open_jobs:
         # Prefer the job's own (live) location, fall back to the poster's profile.
         j_lat = wr.latitude if wr.latitude is not None else wr.created_by.latitude
         j_lon = wr.longitude if wr.longitude is not None else wr.created_by.longitude
         dist = None
         if has_loc and j_lat is not None and j_lon is not None:
             dist = round(get_distance_km(user.latitude, user.longitude, j_lat, j_lon), 1)
-        entries.append((dist, wr.responses.count(), wr.created_at, 'j', wr))
+        entries.append((dist, wr.responses_count, wr.created_at, 'j', wr))
 
-    for cp in CollabPost.objects.filter(status='open').exclude(user=user).exclude(user_id__in=blocked):
+    open_collabs = (
+        CollabPost.objects.filter(status='open')
+        .exclude(user=user).exclude(user_id__in=blocked)
+        .select_related('user', 'user__category')
+        .prefetch_related('skills_needed')
+        .annotate(applicants_count=Count('requests', distinct=True))
+    )
+    for cp in open_collabs:
         dist = None
         if has_loc and cp.latitude is not None and cp.longitude is not None:
             dist = round(get_distance_km(user.latitude, user.longitude, cp.latitude, cp.longitude), 1)
         elif has_loc and cp.user.latitude is not None and cp.user.longitude is not None:
             dist = round(get_distance_km(user.latitude, user.longitude, cp.user.latitude, cp.user.longitude), 1)
-        pop = cp.requests.count() if hasattr(cp, 'requests') else 0
-        entries.append((dist, pop, cp.created_at, 'c', cp))
+        entries.append((dist, cp.applicants_count, cp.created_at, 'c', cp))
 
     if has_loc:
         # nearest first (unknown-distance last), then most applicants, then newest

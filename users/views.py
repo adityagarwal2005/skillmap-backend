@@ -1101,7 +1101,7 @@ def search_users(request):
         # this keeps the search usable even if the token lookup hiccups.
         me, _ = get_user_from_token(request)
 
-        users = User.objects.filter(username__icontains=query)
+        users = User.objects.filter(username__icontains=query).select_related('category').prefetch_related('skills')
         if me:
             users = users.exclude(id=me.id)
             blocked = set(Block.objects.filter(blocker=me).values_list('blocked_id', flat=True))
@@ -1167,7 +1167,7 @@ def discover_users(request):
 
     me, _ = get_user_from_token(request)  # optional — page is authed anyway
 
-    qs = User.objects.all().order_by('-created_at')
+    qs = User.objects.all().order_by('-created_at').select_related('category').prefetch_related('skills')
     if me:
         qs = qs.exclude(id=me.id)
         blocked = set(Block.objects.filter(blocker=me).values_list('blocked_id', flat=True))
