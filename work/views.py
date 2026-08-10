@@ -359,7 +359,7 @@ def close_work_request(request, work_request_id):
                 item = PortfolioItem.objects.create(
                     user=work_request.assigned_to,
                     title=f"Completed: {work_request.description[:80]}",
-                    description="Completed work for a client. Verified on Doithere.",
+                    description="Completed work for a client. Verified on DoitHere.",
                     portfolio_type='project',
                     verified=True,
                     verified_via_work=work_request,
@@ -423,7 +423,7 @@ def complete_work_request(request, work_request_id):
             item = PortfolioItem.objects.create(
                 user=wr.assigned_to,
                 title=f"Completed: {wr.description[:80]}",
-                description="Completed work for a client. Verified on Doithere.",
+                description="Completed work for a client. Verified on DoitHere.",
                 portfolio_type='project',
                 verified=True,
                 verified_via_work=wr,
