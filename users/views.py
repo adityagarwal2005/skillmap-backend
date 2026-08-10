@@ -363,7 +363,7 @@ def report_content(request):
             from django.core.mail import mail_admins
             target = report.reported_user.username if report_type == "user" else f"post #{target_id}"
             mail_admins(
-                f"[SkillMap] New report: {reason}",
+                f"[Doithere] New report: {reason}",
                 f"{user.username} reported {report_type} ({target}) for '{reason}'.\n\n"
                 f"Details: {details or '(none)'}\n\nReview in /admin/users/report/",
             )
@@ -374,17 +374,17 @@ def report_content(request):
     thread.daemon = True
     thread.start()
 
-    return JsonResponse({"message": "Report submitted. Thanks for helping keep SkillMap safe."})
+    return JsonResponse({"message": "Report submitted. Thanks for helping keep Doithere safe."})
 
 
 def send_otp_email(username, email, otp):
     resend.api_key = os.environ.get('RESEND_API_KEY')
     try:
         resend.Emails.send({
-            "from": "SkillMap <noreply@doithere.in>",
+            "from": "Doithere <noreply@doithere.in>",
             "to": [email],
-            "subject": "Your SkillMap verification code",
-            "text": f"Hi {username},\n\nYour SkillMap verification code is:\n\n{otp}\n\nThis code expires in 10 minutes.\n\n— SkillMap Team"
+            "subject": "Your Doithere verification code",
+            "text": f"Hi {username},\n\nYour Doithere verification code is:\n\n{otp}\n\nThis code expires in 10 minutes.\n\n— Doithere Team"
         })
         logger.info("OTP email sent to %s", email)
     except Exception as e:
@@ -546,11 +546,11 @@ def verify_otp_and_register(request):
 
         if referrer:
             from notifications.utils import notify
-            notify(referrer, 'referral', f"{username} joined SkillMap using your invite!", actor=None)
+            notify(referrer, 'referral', f"{username} joined Doithere using your invite!", actor=None)
 
         tokens = get_tokens_for_user(user)
         return JsonResponse({
-            'message': f'Welcome to SkillMap, {username}!',
+            'message': f'Welcome to Doithere, {username}!',
             'user_id': user.id,
             'username': user.username,
             'access':  tokens['access'],
@@ -1299,7 +1299,7 @@ def test_email(request):
         from django.core.mail import send_mail
         try:
             send_mail(
-                subject='SkillMap Test',
+                subject='Doithere Test',
                 message='Test email',
                 from_email=None,
                 recipient_list=[os.environ.get('EMAIL_HOST_USER')],
@@ -1346,7 +1346,7 @@ def register(request):
 
         tokens = get_tokens_for_user(user)
         return JsonResponse({
-            'message': f'Welcome to SkillMap, {username}!',
+            'message': f'Welcome to Doithere, {username}!',
             'user_id': user.id,
             'username': user.username,
             'access':  tokens['access'],

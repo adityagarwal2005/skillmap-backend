@@ -231,7 +231,7 @@ DEFAULT_FROM_EMAIL = os.environ.get('EMAIL_HOST_USER')
 # alerts going to the same address that sends OTP/notification mail;
 # otherwise it defaults to EMAIL_HOST_USER.
 _admin_alert_email = os.environ.get('ADMIN_ALERT_EMAIL') or EMAIL_HOST_USER
-ADMINS = [('SkillMap Admin', _admin_alert_email)] if _admin_alert_email else []
+ADMINS = [('Doithere Admin', _admin_alert_email)] if _admin_alert_email else []
 # Gmail (and most SMTP providers) reject mail whose From header doesn't match
 # the authenticated account, so this must be EMAIL_HOST_USER, not a made-up
 # address — the legacy 'root@localhost' default would silently fail to send.
