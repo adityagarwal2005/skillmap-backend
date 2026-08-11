@@ -28,6 +28,11 @@ def health_check(request):
     # spinning down without wasting a real query on every ping.
     return JsonResponse({"status": "ok"})
 
+
+admin.site.site_header = "DoitHere Admin"
+admin.site.site_title = "DoitHere Admin"
+admin.site.index_title = "Administration"
+
 from users import views as user_views
 from skills import views as skill_views
 from work import views as work_views

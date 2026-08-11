@@ -59,7 +59,7 @@ def notify(recipient, notification_type, message, actor=None):
     except Exception:
         pass
     # Push is fully isolated — its own try/except inside.
-    send_web_push(recipient, 'SkillMap', message, url='/notifications')
+    send_web_push(recipient, 'DoitHere', message, url='/notifications')
 
 
 # Cap how many people a single post can fan out to — a popular category

@@ -1,5 +1,5 @@
 """
-Seed the SkillMap categories (and starter skills) for a college-campus launch.
+Seed the DoitHere categories (and starter skills) for a college-campus launch.
 
 Usage:
     python manage.py seed_categories            # add/ensure the campus set, keep others
