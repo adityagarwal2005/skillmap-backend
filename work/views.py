@@ -260,6 +260,12 @@ def respond_to_work_request(request, work_request_id):
                 status=status,
                 message=message if message else None,
             )
+
+            if status == 'accepted':
+                from notifications.utils import notify
+                notify(work_request.created_by, 'proposal',
+                       f"{user.username} applied to your job: {work_request.description[:50]}", actor=user)
+
             return JsonResponse({"message": f"Response '{status}' submitted successfully"})
 
         except WorkRequest.DoesNotExist:
@@ -330,6 +336,10 @@ def assign_work_request(request, work_request_id):
                 conversation_type='freelance'
             )
             conversation.participants.add(user, assignee)
+
+            from notifications.utils import notify
+            notify(assignee, 'proposal_accepted',
+                   f"{user.username} hired you for: {work_request.description[:50]}", actor=user)
 
             return JsonResponse({
                 "message": f"Work assigned to {assignee.username} successfully",
