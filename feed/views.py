@@ -125,7 +125,7 @@ def _job_item(wr, request, distance=None):
         'skills': [s.name for s in wr.required_skills.all()],
         'created_at': str(wr.created_at) if wr.created_at else None,
         'payment_amount': wr.payment_amount,
-        'time_limit_hours': wr.time_limit_hours,
+        'expires_at': str(wr.expires_at) if wr.expires_at else None,
         'responses_count': count,
         'distance_km': distance,
         'media': wr.media or None,
