@@ -23,3 +23,8 @@ typing_extensions==4.15.0
 urllib3==2.6.3
 whitenoise==6.7.0
 pywebpush==2.0.0
+google-auth==2.35.0
+cachetools==5.5.2
+pyasn1==0.6.4
+pyasn1-modules==0.4.2
+rsa==4.9.1

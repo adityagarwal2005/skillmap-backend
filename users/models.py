@@ -24,6 +24,7 @@ class User(models.Model):
     github_url = models.URLField(null=True, blank=True)
     instagram_url = models.URLField(null=True, blank=True)
     whatsapp = models.CharField(max_length=20, blank=True, default='')
+    google_sub = models.CharField(max_length=255, unique=True, null=True, blank=True)
     dob = models.DateField(null=True, blank=True)
     headline = models.CharField(max_length=120, blank=True, default='')
     bio = models.TextField(blank=True, default='')

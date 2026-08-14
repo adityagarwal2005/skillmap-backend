@@ -268,3 +268,6 @@ LOGGING = {
 VAPID_PUBLIC_KEY = os.environ.get('VAPID_PUBLIC_KEY', '')
 VAPID_PRIVATE_KEY = os.environ.get('VAPID_PRIVATE_KEY', '')
 VAPID_CLAIMS_EMAIL = os.environ.get('VAPID_CLAIMS_EMAIL', 'mailto:admin@doithere.in')
+
+# ── Google Sign-In ──
+GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')

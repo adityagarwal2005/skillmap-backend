@@ -1,4 +1,5 @@
 from django.http import JsonResponse
+from django.conf import settings
 from django.contrib.auth.hashers import make_password, check_password
 from django.core.mail import send_mail
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -97,13 +98,15 @@ def upload_media_file(media_file, folder='posts'):
 
 def has_contact(user):
     """True if the user has connected at least one identity account so others
-    can verify who they are: GitHub, LinkedIn, or Instagram. This is the same
-    check onboarding's "Connect an account" step enforces — WhatsApp isn't
-    part of it, since it isn't collected during onboarding."""
+    can verify who they are: GitHub, LinkedIn, Instagram, or a verified Google
+    sign-in (Google itself already verified the email, so it clears the same
+    trust bar). WhatsApp isn't part of it, since it isn't collected during
+    onboarding."""
     return bool(
         (user.github_url or '').strip()
         or (user.linkedin_url or '').strip()
         or (user.instagram_url or '').strip()
+        or user.google_sub
     )
 
 
@@ -113,7 +116,8 @@ def require_contact(user):
     if not has_contact(user):
         return JsonResponse({
             "error": "Connect a GitHub, LinkedIn, or Instagram account first "
-                     "so people can verify who they're working with.",
+                     "(from your profile's Edit page) so people can verify "
+                     "who they're working with.",
             "code": "contact_required",
         }, status=403)
     return None
@@ -766,6 +770,87 @@ def login(request):
         })
 
     return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+
+def _unique_username_from_email(email):
+    base = (email.split('@')[0] or 'user')
+    base = ''.join(c for c in base if c.isalnum() or c in '._-') or 'user'
+    candidate = base
+    i = 0
+    while User.objects.filter(username__iexact=candidate).exists():
+        i += 1
+        candidate = f'{base}{i}'
+    return candidate
+
+
+def google_login(request):
+    """Sign in (or silently register) with a Google ID token from Google
+    Identity Services. One tap, no password, no SMS provider — and since the
+    email comes pre-verified by Google, a connected Google account also
+    satisfies has_contact() (see below), the same trust bar GitHub/LinkedIn/
+    Instagram already clear."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    credential = request.POST.get('credential', '').strip()
+    if not credential:
+        return JsonResponse({'error': 'Missing Google credential'}, status=400)
+
+    client_id = getattr(settings, 'GOOGLE_CLIENT_ID', '')
+    if not client_id:
+        return JsonResponse({'error': 'Google sign-in is not configured on this server yet.'}, status=503)
+
+    try:
+        from google.oauth2 import id_token as google_id_token
+        from google.auth.transport import requests as google_requests
+        idinfo = google_id_token.verify_oauth2_token(
+            credential, google_requests.Request(), client_id
+        )
+    except Exception:
+        return JsonResponse({'error': 'Invalid or expired Google credential'}, status=401)
+
+    if not idinfo.get('email_verified', False):
+        return JsonResponse({'error': 'That Google account\'s email isn\'t verified'}, status=401)
+
+    sub = idinfo['sub']
+    email = idinfo['email']
+
+    user = User.objects.filter(google_sub=sub).first()
+    if not user:
+        # Link to an existing password account with the same email, else
+        # create a brand-new (password-less) account.
+        user = User.objects.filter(email__iexact=email).first()
+        if user:
+            user.google_sub = sub
+            user.save(update_fields=['google_sub'])
+        else:
+            latitude = request.POST.get('latitude')
+            longitude = request.POST.get('longitude')
+            referred_by = request.POST.get('referred_by', '').strip()
+            referrer = User.objects.filter(username__iexact=referred_by).first() if referred_by else None
+
+            user = User.objects.create(
+                username=_unique_username_from_email(email),
+                email=email,
+                password=make_password(None),  # unusable — this account only signs in via Google
+                google_sub=sub,
+                latitude=float(latitude) if latitude else None,
+                longitude=float(longitude) if longitude else None,
+                invited_by=referrer,
+            )
+            if referrer:
+                from notifications.utils import notify
+                notify(referrer, 'referral', f"{user.username} joined DoitHere using your invite!", actor=None)
+
+    tokens = get_tokens_for_user(user)
+    return JsonResponse({
+        'message': f'Welcome, {user.username}!',
+        'user_id': user.id,
+        'username': user.username,
+        'access':  tokens['access'],
+        'refresh': tokens['refresh'],
+    })
+
 
 def refresh_token(request):
     if request.method == "POST":
