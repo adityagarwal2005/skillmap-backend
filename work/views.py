@@ -157,8 +157,15 @@ def get_available_work_requests(request, user_id):
     blocked_by = set(Block.objects.filter(blocked=user).values_list('blocker_id', flat=True))
     hidden = blocked | blocked_by
 
-    # Newest first — this is a live job board.
-    work_requests = WorkRequest.objects.filter(status='open').order_by('-created_at')
+    # Newest first — this is a live job board. Expired-but-still-"open" jobs
+    # (nothing auto-closes status on expiry) are hidden from browsing, even
+    # though respond_to_work_request already blocked applying to them.
+    from django.db.models import Q
+    work_requests = (
+        WorkRequest.objects.filter(status='open')
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
+        .order_by('-created_at')
+    )
 
     results = []
     for wr in work_requests:
@@ -331,11 +338,25 @@ def assign_work_request(request, work_request_id):
             work_request.status = 'assigned'
             work_request.save()
 
-            conversation = Conversation.objects.create(
-                work_request=work_request,
-                conversation_type='freelance'
+            # Reuse an existing 1:1 conversation with this person (from a friend
+            # DM, an earlier job together, etc.) instead of always spinning up a
+            # fresh thread — otherwise hiring someone you're already talking to
+            # silently splits the conversation in two.
+            conversation = next(
+                (c for c in Conversation.objects.filter(participants=user).filter(participants=assignee)
+                 if c.participants.count() == 2),
+                None,
             )
-            conversation.participants.add(user, assignee)
+            if conversation:
+                if conversation.work_request_id is None:
+                    conversation.work_request = work_request
+                    conversation.save(update_fields=['work_request'])
+            else:
+                conversation = Conversation.objects.create(
+                    work_request=work_request,
+                    conversation_type='freelance'
+                )
+                conversation.participants.add(user, assignee)
 
             from notifications.utils import notify
             notify(assignee, 'proposal_accepted',
@@ -539,8 +560,16 @@ def respond_to_work_proposal(request, proposal_id):
                    f"{user.username} {status} your work proposal", actor=user)
 
             if status == 'accepted':
-                conversation = Conversation.objects.create(conversation_type='work')
-                conversation.participants.add(user, proposal.sender)
+                # Same reuse logic as assign_work_request — don't fork a second
+                # thread if these two already have a conversation going.
+                conversation = next(
+                    (c for c in Conversation.objects.filter(participants=user).filter(participants=proposal.sender)
+                     if c.participants.count() == 2),
+                    None,
+                )
+                if not conversation:
+                    conversation = Conversation.objects.create(conversation_type='work')
+                    conversation.participants.add(user, proposal.sender)
                 return JsonResponse({
                     "message": "Proposal accepted — conversation started",
                     "conversation_id": conversation.id

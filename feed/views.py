@@ -1,5 +1,6 @@
 from django.http import JsonResponse
 from django.db.models import Q, Count
+from django.utils import timezone
 from users.models import User, Block
 from skills.models import Skill, Tag
 from users.views import get_user_from_token
@@ -178,6 +179,7 @@ def smart_feed(request):
 
     open_jobs = (
         WorkRequest.objects.filter(status='open')
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
         .exclude(created_by=user).exclude(created_by_id__in=blocked)
         .select_related('created_by', 'created_by__category')
         .prefetch_related('required_skills')
@@ -301,6 +303,7 @@ def trending_feed(request):
 
     open_jobs = (
         WorkRequest.objects.filter(status='open')
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
         .exclude(created_by=user).exclude(created_by_id__in=blocked)
         .select_related('created_by', 'created_by__category')
         .prefetch_related('required_skills')
