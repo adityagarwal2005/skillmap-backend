@@ -24,6 +24,7 @@ class User(models.Model):
     github_url = models.URLField(null=True, blank=True)
     instagram_url = models.URLField(null=True, blank=True)
     whatsapp = models.CharField(max_length=20, blank=True, default='')
+    phone_verified = models.BooleanField(default=False)
     google_sub = models.CharField(max_length=255, unique=True, null=True, blank=True)
     dob = models.DateField(null=True, blank=True)
     headline = models.CharField(max_length=120, blank=True, default='')
@@ -62,6 +63,17 @@ from django.utils import timezone
 
 class OTPVerification(models.Model):
     email   = models.EmailField()
+    otp     = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_used = models.BooleanField(default=False)
+
+    def is_expired(self):
+        return (timezone.now() - self.created_at).seconds > 600  # 10 min expiry
+
+
+class PhoneOTPVerification(models.Model):
+    """Mirrors OTPVerification but for WhatsApp-delivered phone verification."""
+    phone   = models.CharField(max_length=20)
     otp     = models.CharField(max_length=6)
     created_at = models.DateTimeField(auto_now_add=True)
     is_used = models.BooleanField(default=False)

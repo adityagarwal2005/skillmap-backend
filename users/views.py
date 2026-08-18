@@ -4,7 +4,7 @@ from django.contrib.auth.hashers import make_password, check_password
 from django.core.mail import send_mail
 from rest_framework_simplejwt.tokens import RefreshToken
 from smtplib import SMTPException
-from .models import User, StudentProfile, OTPVerification, Block, Report, SkillEndorsement, Friendship
+from .models import User, StudentProfile, OTPVerification, PhoneOTPVerification, Block, Report, SkillEndorsement, Friendship
 from skills.models import Category, Skill
 import random
 import threading
@@ -97,27 +97,22 @@ def upload_media_file(media_file, folder='posts'):
 
 
 def has_contact(user):
-    """True if the user has connected at least one identity account so others
-    can verify who they are: GitHub, LinkedIn, Instagram, or a verified Google
-    sign-in (Google itself already verified the email, so it clears the same
-    trust bar). WhatsApp isn't part of it, since it isn't collected during
-    onboarding."""
-    return bool(
-        (user.github_url or '').strip()
-        or (user.linkedin_url or '').strip()
-        or (user.instagram_url or '').strip()
-        or user.google_sub
-    )
+    """True if the user has a verified identity so others can trust who
+    they're dealing with: a WhatsApp-verified phone number, or a verified
+    Google sign-in (Google itself already verified the email). Unverified
+    social links (GitHub/LinkedIn/Instagram) used to count here, but they
+    were never actually checked — anyone could type a fake URL — so they
+    were dropped as a trust signal entirely."""
+    return bool(user.phone_verified or user.google_sub)
 
 
 def require_contact(user):
-    """Return a 403 JsonResponse if the user hasn't connected an account yet,
-    else None. Gate work/collab posting + accepting behind this."""
+    """Return a 403 JsonResponse if the user hasn't verified their identity
+    yet, else None. Gate work/collab posting + accepting behind this."""
     if not has_contact(user):
         return JsonResponse({
-            "error": "Connect a GitHub, LinkedIn, or Instagram account first "
-                     "(from your profile's Edit page) so people can verify "
-                     "who they're working with.",
+            "error": "Verify your phone number first (Settings → Verify phone) "
+                     "so people can trust who they're working with.",
             "code": "contact_required",
         }, status=403)
     return None
@@ -728,6 +723,105 @@ def reset_password_with_otp(request):
     })
 
 
+def _normalize_phone(raw):
+    """Strip everything but digits, then require a country code (10-15
+    digits total) — WhatsApp's API wants digits only, no +, no spaces."""
+    digits = ''.join(c for c in raw if c.isdigit())
+    if len(digits) < 10 or len(digits) > 15:
+        return None
+    return digits
+
+
+def check_phone_otp_cooldown(phone, seconds=45):
+    """Same idea as check_otp_cooldown, scoped to PhoneOTPVerification —
+    without it, send_phone_otp has no rate limit and someone could spam a
+    stranger's WhatsApp with codes (and burn through the paid per-message
+    quota) just by typing their number in the verify form."""
+    from django.utils import timezone
+    recent = PhoneOTPVerification.objects.filter(phone=phone).order_by('-created_at').first()
+    if recent:
+        elapsed = (timezone.now() - recent.created_at).total_seconds()
+        if elapsed < seconds:
+            return JsonResponse(
+                {'error': f'Please wait {int(seconds - elapsed)}s before requesting another code.'},
+                status=429,
+            )
+    return None
+
+
+def send_phone_otp(request):
+    """Send a WhatsApp OTP to the logged-in user's own phone number, to
+    verify it's really theirs. Requires auth (unlike email OTP at signup)
+    since this verifies an EXISTING account's identity, not a new one."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    user, error = get_user_from_token(request)
+    if error:
+        return error
+
+    raw_phone = request.POST.get('phone', '').strip()
+    phone = _normalize_phone(raw_phone)
+    if not phone:
+        return JsonResponse({'error': 'Enter a valid phone number with country code'}, status=400)
+
+    guard = check_phone_otp_cooldown(phone)
+    if guard:
+        return guard
+
+    otp = str(random.randint(100000, 999999))
+    PhoneOTPVerification.objects.filter(phone=phone).delete()
+    PhoneOTPVerification.objects.create(phone=phone, otp=otp)
+
+    from .whatsapp import send_whatsapp_otp, WhatsAppSendError
+    try:
+        send_whatsapp_otp(phone, otp)
+    except WhatsAppSendError as e:
+        return JsonResponse({'error': str(e)}, status=502)
+
+    return JsonResponse({'message': f'Code sent to {raw_phone} on WhatsApp'})
+
+
+def verify_phone_otp(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    user, error = get_user_from_token(request)
+    if error:
+        return error
+
+    raw_phone = request.POST.get('phone', '').strip()
+    phone = _normalize_phone(raw_phone)
+    otp = request.POST.get('otp', '').strip()
+    if not phone or not otp:
+        return JsonResponse({'error': 'Phone and code are required'}, status=400)
+
+    guard = check_otp_attempts(f'phone:{phone}')
+    if guard:
+        return guard
+
+    try:
+        otp_obj = PhoneOTPVerification.objects.filter(
+            phone=phone, otp=otp, is_used=False
+        ).latest('created_at')
+    except PhoneOTPVerification.DoesNotExist:
+        record_otp_failure(f'phone:{phone}')
+        return JsonResponse({'error': 'Invalid code. Please try again.'}, status=400)
+
+    if otp_obj.is_expired():
+        return JsonResponse({'error': 'Code expired. Please request a new one.'}, status=400)
+
+    otp_obj.is_used = True
+    otp_obj.save()
+    clear_otp_attempts(f'phone:{phone}')
+
+    user.whatsapp = raw_phone
+    user.phone_verified = True
+    user.save(update_fields=['whatsapp', 'phone_verified'])
+
+    return JsonResponse({'message': 'Phone verified!', 'whatsapp': raw_phone})
+
+
 LOGIN_MAX_ATTEMPTS = 5
 LOGIN_LOCKOUT_SECONDS = 15 * 60
 
@@ -1004,6 +1098,7 @@ def get_user(request, user_id):
                 "github_url": user.github_url,
                 "instagram_url": user.instagram_url,
                 "whatsapp": user.whatsapp,
+                "phone_verified": user.phone_verified,
                 "dob": user.dob,
                 "headline": user.headline,
                 "bio": user.bio,

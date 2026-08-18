@@ -271,3 +271,11 @@ VAPID_CLAIMS_EMAIL = os.environ.get('VAPID_CLAIMS_EMAIL', 'mailto:admin@doithere
 
 # ── Google Sign-In ──
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
+
+# ── WhatsApp Business Platform (phone OTP) ──
+WHATSAPP_ACCESS_TOKEN = os.environ.get('WHATSAPP_ACCESS_TOKEN', '')
+WHATSAPP_PHONE_NUMBER_ID = os.environ.get('WHATSAPP_PHONE_NUMBER_ID', '')
+# Name of the approved "Authentication" category template in Meta Business
+# Manager (Account tools > Message templates). Meta's one-click prebuilt
+# authentication template is usually named "otp" or similar once created.
+WHATSAPP_OTP_TEMPLATE = os.environ.get('WHATSAPP_OTP_TEMPLATE', 'otp')
