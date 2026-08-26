@@ -10,11 +10,18 @@ class WorkRequest(models.Model):
         ('closed', 'Closed'),
     ]
 
+    GENDER_CHOICES = [
+        ('any', 'Any'),
+        ('male', 'Male'),
+        ('female', 'Female'),
+    ]
+
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='work_requests')
     description = models.TextField()
     required_skills = models.ManyToManyField(Skill, related_name='work_requests')
     payment_amount = models.FloatField()
     time_limit_hours = models.IntegerField()
+    gender_preference = models.CharField(max_length=10, choices=GENDER_CHOICES, default='any')
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='open')
     assigned_to = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_work')
     latitude = models.FloatField(null=True, blank=True)

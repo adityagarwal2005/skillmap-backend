@@ -107,14 +107,12 @@ def has_contact(user):
 
 
 def require_contact(user):
-    """Return a 403 JsonResponse if the user hasn't verified their identity
-    yet, else None. Gate work/collab posting + accepting behind this."""
-    if not has_contact(user):
-        return JsonResponse({
-            "error": "Verify your phone number first (Settings → Verify phone) "
-                     "so people can trust who they're working with.",
-            "code": "contact_required",
-        }, status=403)
+    """Trust gate for posting/accepting work.
+
+    Phone verification was removed from the product, so this no longer blocks
+    anyone — any signed-in user may post or accept. Kept as a hook (and still
+    called at the call sites) so a future trust signal can slot back in here
+    without touching every view."""
     return None
 
 

@@ -80,6 +80,9 @@ def create_work_request(request):
         latitude = request.POST.get("latitude", "").strip()
         longitude = request.POST.get("longitude", "").strip()
         range_km = request.POST.get("range_km", "").strip()
+        gender_preference = request.POST.get("gender_preference", "any").strip().lower()
+        if gender_preference not in ("any", "male", "female"):
+            gender_preference = "any"
         from users.views import upload_media_file
         media_url, media_type = upload_media_file(request.FILES.get("media"))
         work_request = WorkRequest.objects.create(
@@ -87,6 +90,7 @@ def create_work_request(request):
             description=description,
             payment_amount=float(payment_amount),
             time_limit_hours=int(time_limit_hours),
+            gender_preference=gender_preference,
             expires_at=expires_at,
             status='open',
             latitude=float(latitude) if latitude else None,
@@ -124,6 +128,7 @@ def get_my_work_requests(request, user_id):
                     "skills": [s.name for s in wr.required_skills.all()],
                     "payment_amount": wr.payment_amount,
                     "time_limit_hours": wr.time_limit_hours,
+                    "gender_preference": getattr(wr, "gender_preference", "any"),
                     "status": wr.status,
                     "assigned_to": wr.assigned_to.username if wr.assigned_to else None,
                     "assigned_to_id": wr.assigned_to_id,
@@ -209,6 +214,7 @@ def get_available_work_requests(request, user_id):
             'description':      wr.description,
             'payment_amount':   wr.payment_amount,
             'time_limit_hours': wr.time_limit_hours,
+            'gender_preference': getattr(wr, 'gender_preference', 'any'),
             'status':           wr.status,
             'created_by':       wr.created_by.username,
             'skills':           [s.name for s in wr.required_skills.all()],
