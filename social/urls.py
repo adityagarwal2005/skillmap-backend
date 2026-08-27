@@ -124,6 +124,7 @@ urlpatterns = [
     path("work/requests/<int:work_request_id>/respond/", csrf_exempt(work_views.respond_to_work_request)),
     path("work/requests/<int:work_request_id>/responses/", csrf_exempt(work_views.get_work_request_responses)),
     path("work/requests/<int:work_request_id>/assign/", csrf_exempt(work_views.assign_work_request)),
+    path("work/requests/<int:work_request_id>/reject/", csrf_exempt(work_views.reject_work_applicant)),
     path("work/requests/<int:work_request_id>/close/", csrf_exempt(work_views.close_work_request)),
     path("work/requests/<int:work_request_id>/complete/", csrf_exempt(work_views.complete_work_request)),
 

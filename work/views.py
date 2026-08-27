@@ -381,6 +381,34 @@ def assign_work_request(request, work_request_id):
     return JsonResponse({"error": "Method not allowed"}, status=405)
 
 
+def reject_work_applicant(request, work_request_id):
+    """Post owner declines an applicant. Deletes their WorkRequestResponse so
+    the applicant is removed and is free to apply to the same job again."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    user, error = get_user_from_request(request)
+    if error:
+        return error
+
+    applicant_id = request.POST.get("applicant_id", "").strip()
+    if not applicant_id:
+        return JsonResponse({"error": "applicant_id is required"}, status=400)
+
+    try:
+        work_request = WorkRequest.objects.get(id=work_request_id, created_by=user)
+    except WorkRequest.DoesNotExist:
+        return JsonResponse({"error": "Work request not found or not yours"}, status=404)
+
+    deleted, _ = WorkRequestResponse.objects.filter(
+        work_request=work_request, user_id=applicant_id
+    ).delete()
+    if not deleted:
+        return JsonResponse({"error": "That applicant was not found on this job"}, status=404)
+
+    return JsonResponse({"message": "Applicant declined"})
+
+
 def close_work_request(request, work_request_id):
     if request.method == "POST":
         user, error = get_user_from_request(request)
