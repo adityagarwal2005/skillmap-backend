@@ -26,6 +26,8 @@ class CollabPost(models.Model):
     range_km = models.FloatField(null=True, blank=True)   # only people within this many km see it
     media = models.CharField(max_length=500, blank=True, default='')       # Cloudinary URL
     media_type = models.CharField(max_length=10, blank=True, default='')   # image|video
+    time_limit_hours = models.IntegerField(null=True, blank=True)          # visibility window
+    expires_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, null=True)
 
     def __str__(self):

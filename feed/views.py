@@ -149,6 +149,7 @@ def _collab_item(cp, request, distance=None):
         'created_at': str(cp.created_at) if cp.created_at else None,
         'collab_type': cp.collab_type,
         'applicants': count,
+        'expires_at': str(cp.expires_at) if getattr(cp, 'expires_at', None) else None,
         'distance_km': distance,
         'media': cp.media or None,
         'media_type': cp.media_type or None,

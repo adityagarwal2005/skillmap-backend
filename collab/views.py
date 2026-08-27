@@ -50,6 +50,17 @@ def create_collab_post(request):
         latitude = request.POST.get("latitude", "").strip()
         longitude = request.POST.get("longitude", "").strip()
         range_km = request.POST.get("range_km", "").strip()
+
+        # Visibility window — collab posts now expire like freelance jobs.
+        from django.utils import timezone
+        from datetime import timedelta
+        tlh = request.POST.get("time_limit_hours", "").strip()
+        try:
+            time_limit_hours = int(tlh) if tlh else None
+        except ValueError:
+            time_limit_hours = None
+        expires_at = timezone.now() + timedelta(hours=time_limit_hours) if time_limit_hours else None
+
         from users.views import upload_media_file
         media_url, media_type = upload_media_file(request.FILES.get("media"))
         post = CollabPost.objects.create(
@@ -60,6 +71,8 @@ def create_collab_post(request):
             latitude=float(latitude) if latitude else None,
             longitude=float(longitude) if longitude else None,
             range_km=float(range_km) if range_km else None,
+            time_limit_hours=time_limit_hours,
+            expires_at=expires_at,
             media=media_url,
             media_type=media_type,
         )
@@ -123,9 +136,17 @@ def show_collab_posts(request):
         .annotate(applicants_count=Count('requests', distinct=True))
     )
 
+    from django.utils import timezone
+    now = timezone.now()
+
     results = []
     for post in posts:
         if post.user_id in hidden:
+            continue
+
+        # Hide collabs whose visibility window has elapsed (nothing auto-closes
+        # status on expiry), mirroring the freelance board.
+        if getattr(post, 'expires_at', None) and post.expires_at < now:
             continue
 
         # Type filter
@@ -167,6 +188,7 @@ def show_collab_posts(request):
             'skills_needed':[s.name for s in post.skills_needed.all()],
             'applicants':   post.applicants_count,
             'distance_km':  dist_display,
+            'expires_at':   str(post.expires_at) if getattr(post, 'expires_at', None) else None,
             'media':        post.media or None,
             'media_type':   post.media_type or None,
         })
@@ -196,6 +218,7 @@ def show_my_collab_posts(request):
                 "status": p.status,
                 "skills_needed": [s.name for s in p.skills_needed.all()],
                 "applicants": p.requests.count(),
+                "expires_at": str(p.expires_at) if getattr(p, 'expires_at', None) else None,
                 "created_at": p.created_at,
             }
             for p in posts
