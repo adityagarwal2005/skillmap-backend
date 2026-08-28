@@ -3,7 +3,6 @@ from django.conf import settings
 from django.contrib.auth.hashers import make_password, check_password
 from django.core.mail import send_mail
 from rest_framework_simplejwt.tokens import RefreshToken
-from smtplib import SMTPException
 from .models import User, StudentProfile, OTPVerification, PhoneOTPVerification, Block, Report, SkillEndorsement, Friendship
 from skills.models import Category, Skill
 import random

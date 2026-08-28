@@ -1,11 +1,10 @@
 from django.http import JsonResponse
 from django.db.models import Q, Count
 from django.utils import timezone
-from users.models import User, Block
-from skills.models import Skill, Tag
+from users.models import Block
 from users.views import get_user_from_token
 import math
-from portfolio.models import PortfolioItem, Reaction, Comment
+from portfolio.models import PortfolioItem
 
 
 STOP_WORDS = {

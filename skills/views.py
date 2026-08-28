@@ -3,7 +3,6 @@ from django.db.models import Q
 from .models import Category, Skill, UserSkill
 from users.models import User
 from users.views import get_user_from_token
-import math
 
 
 def add_category(request):

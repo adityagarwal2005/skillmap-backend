@@ -58,7 +58,6 @@ class StudentProfile(models.Model):
         return f"{self.user.username} - {self.education_type}"
     
 
-import random
 from django.utils import timezone
 
 class OTPVerification(models.Model):
