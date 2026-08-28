@@ -4,7 +4,7 @@ from django.utils import timezone
 from datetime import timedelta
 from .models import WorkRequest, WorkRequestResponse, WorkProposal, Conversation, Message, TypingStatus
 from users.models import User
-from skills.models import Skill, Category
+# Skill/Category are reached via skills.utils now (see create_work_request).
 from users.views import get_user_from_token, require_contact
 
 
@@ -66,11 +66,13 @@ def create_work_request(request):
         if not description or not payment_amount or not time_limit_hours or not skills:
             return JsonResponse({"error": "description, payment_amount, time_limit_hours and skills are required"}, status=400)
 
+        from skills.utils import get_or_create_skill
         skill_list = [s.strip() for s in skills.split(",") if s.strip()]
         skill_objects = []
         for skill_name in skill_list:
-            skill, _ = Skill.objects.get_or_create(name__iexact=skill_name, defaults={"name": skill_name})
-            skill_objects.append(skill)
+            skill = get_or_create_skill(skill_name)
+            if skill:
+                skill_objects.append(skill)
 
         try:
             expires_at = timezone.now() + timedelta(hours=int(time_limit_hours))

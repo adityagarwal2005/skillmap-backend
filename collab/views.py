@@ -2,7 +2,7 @@ from django.http import JsonResponse
 from django.utils import timezone
 from .models import CollabPost, CollabRequest, CollabTask
 from users.models import User
-from skills.models import Skill
+# Skill is reached via skills.utils now (see create_collab_post).
 from users.views import get_user_from_token, require_contact
 from work.views import get_distance_km
 
@@ -78,18 +78,16 @@ def create_collab_post(request):
         )
 
         if skills_input:
-            skill_list = [s.strip() for s in skills_input.split(",")]
+            # Create unknown skills rather than rejecting the post — the
+            # freelance side already does, and a collab was otherwise
+            # impossible to file under any skill that didn't exist yet.
+            from skills.utils import get_or_create_skill
+            skill_list = [s.strip() for s in skills_input.split(",") if s.strip()]
             skill_objects = []
-            invalid = []
             for skill_name in skill_list:
-                try:
-                    skill = Skill.objects.get(name__iexact=skill_name)
+                skill = get_or_create_skill(skill_name)
+                if skill:
                     skill_objects.append(skill)
-                except Skill.DoesNotExist:
-                    invalid.append(skill_name)
-            if invalid:
-                post.delete()
-                return JsonResponse({"error": f"Invalid skills: {', '.join(invalid)}"}, status=400)
             post.skills_needed.set(skill_objects)
 
             from notifications.utils import notify_category_match

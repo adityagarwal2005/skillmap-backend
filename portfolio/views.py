@@ -43,13 +43,14 @@ def create_portfolio_item(request):
         # don't recognise is kept as a tag instead of rejecting the whole post.
         extra_tags = []
         if skills_input:
+            from skills.utils import find_skill
             skill_list = [s.strip() for s in skills_input.split(",") if s.strip()]
             skill_objects = []
             for skill_name in skill_list:
-                try:
-                    skill = Skill.objects.get(name__iexact=skill_name)
+                skill = find_skill(skill_name)
+                if skill:
                     skill_objects.append(skill)
-                except Skill.DoesNotExist:
+                else:
                     tag, _ = Tag.objects.get_or_create(name=skill_name)
                     extra_tags.append(tag)
             if skill_objects:
@@ -228,14 +229,14 @@ def edit_portfolio_item(request, item_id):
                 item.portfolio_type = portfolio_type
 
             if skills_input:
-                skill_list = [s.strip() for s in skills_input.split(",")]
+                from skills.utils import find_skill
+                skill_list = [s.strip() for s in skills_input.split(",") if s.strip()]
                 skill_objects = []
                 for skill_name in skill_list:
-                    try:
-                        skill = Skill.objects.get(name__iexact=skill_name)
-                        skill_objects.append(skill)
-                    except Skill.DoesNotExist:
+                    skill = find_skill(skill_name)
+                    if not skill:
                         return JsonResponse({"error": f"Skill '{skill_name}' not found"}, status=400)
+                    skill_objects.append(skill)
                 item.skills.set(skill_objects)
 
             if tags_input:
