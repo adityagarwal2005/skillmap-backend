@@ -907,6 +907,7 @@ def google_login(request):
     sub = idinfo['sub']
     email = idinfo['email']
 
+    is_new_user = False
     user = User.objects.filter(google_sub=sub).first()
     if not user:
         # Link to an existing password account with the same email, else
@@ -930,6 +931,7 @@ def google_login(request):
                 longitude=float(longitude) if longitude else None,
                 invited_by=referrer,
             )
+            is_new_user = True
             if referrer:
                 from notifications.utils import notify
                 notify(referrer, 'referral', f"{user.username} joined DoitHere using your invite!", actor=None)
@@ -939,6 +941,11 @@ def google_login(request):
         'message': f'Welcome, {user.username}!',
         'user_id': user.id,
         'username': user.username,
+        # New Google accounts get an auto-generated username from their email
+        # (e.g. "adityaisbuildingsomething") — the frontend uses this flag to
+        # send them through a one-time "pick a username" step instead of
+        # leaving them stuck with it.
+        'is_new_user': is_new_user,
         'access':  tokens['access'],
         'refresh': tokens['refresh'],
     })
@@ -1171,7 +1178,9 @@ def edit_user(request, user_id):
         instagram_url = request.POST.get("instagram_url", "").strip()
         dob = request.POST.get("dob", "").strip()
 
-        if username:
+        if username and username != user.username:
+            if User.objects.exclude(id=user.id).filter(username__iexact=username).exists():
+                return JsonResponse({"error": "This username is already taken."}, status=400)
             user.username = username
         if email:
             user.email = email
