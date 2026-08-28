@@ -52,7 +52,9 @@ def create_collab_post(request):
         range_km = request.POST.get("range_km", "").strip()
 
         # Visibility window — collab posts now expire like freelance jobs.
-        from django.utils import timezone
+        # (timezone is imported at module level; re-importing it here made it a
+        # function-local name, so the flood-guard's timezone.now() above blew
+        # up with UnboundLocalError before this line ever ran.)
         from datetime import timedelta
         tlh = request.POST.get("time_limit_hours", "").strip()
         try:
@@ -134,7 +136,6 @@ def show_collab_posts(request):
         .annotate(applicants_count=Count('requests', distinct=True))
     )
 
-    from django.utils import timezone
     now = timezone.now()
 
     results = []
