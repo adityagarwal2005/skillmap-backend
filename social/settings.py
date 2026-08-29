@@ -214,10 +214,20 @@ EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 # ── Production security hardening ──
 # Kicks in automatically once DEBUG is False (set DEBUG=False in Render env).
 if not DEBUG:
-    # Render terminates TLS at its proxy and forwards this header; it also
-    # already redirects HTTP->HTTPS at the edge, so we don't set
-    # SECURE_SSL_REDIRECT (that can break Render's internal health checks).
+    # The platform (now Cloud Run) terminates TLS and forwards this header.
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+    # SECURE_SSL_REDIRECT is opt-in via env rather than hardcoded on: it makes
+    # Django 301 any request that doesn't carry X-Forwarded-Proto: https,
+    # which includes platform health/startup probes that hit the container
+    # directly over HTTP — turning it on blind can fail a deploy. HSTS below
+    # already forces HTTPS for any browser that has visited once. Set
+    # SECURE_SSL_REDIRECT=True in the environment once you've confirmed the
+    # probes still pass.
+    SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'False') == 'True'
+    # Keep the health endpoint reachable over plain HTTP even when the
+    # redirect is enabled, so probes never get a 301.
+    SECURE_REDIRECT_EXEMPT = [r'^health/$']
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_HSTS_SECONDS = 31536000          # 1 year

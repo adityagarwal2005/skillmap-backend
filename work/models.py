@@ -35,6 +35,15 @@ class WorkRequest(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     expires_at = models.DateTimeField(null=True, blank=True)
 
+    class Meta:
+        indexes = [
+            # The feed filters status='open' + an expires_at window, then
+            # orders by -created_at. Without this, that's a sequential scan of
+            # every job on the busiest endpoint in the app.
+            models.Index(fields=['status', '-created_at'], name='wr_status_created_idx'),
+            models.Index(fields=['expires_at'], name='wr_expires_idx'),
+        ]
+
     def __str__(self):
         return f"{self.created_by.username} - {self.description[:30]}"
 
@@ -117,6 +126,15 @@ class Message(models.Model):
     media_type = models.CharField(max_length=10, choices=MEDIA_TYPE_CHOICES, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     read_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            # An open thread re-fetches its messages every few seconds, so this
+            # is one of the highest-frequency queries in the app. Django's
+            # default FK index covers conversation_id alone; including
+            # created_at lets the ordering come from the index too.
+            models.Index(fields=['conversation', 'created_at'], name='msg_conv_created_idx'),
+        ]
 
     def __str__(self):
         return f"{self.sender.username}: {self.text[:30]}"

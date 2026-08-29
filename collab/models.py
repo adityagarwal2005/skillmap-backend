@@ -30,6 +30,13 @@ class CollabPost(models.Model):
     expires_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, null=True)
 
+    class Meta:
+        indexes = [
+            # Mirrors the WorkRequest index — the same feed query shape.
+            models.Index(fields=['status', '-created_at'], name='cp_status_created_idx'),
+            models.Index(fields=['expires_at'], name='cp_expires_idx'),
+        ]
+
     def __str__(self):
         return f"{self.user.username} - {self.title}"
 

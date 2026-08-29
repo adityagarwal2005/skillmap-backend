@@ -33,6 +33,11 @@ class Notification(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            # get_unread_count() runs on every screen, on a timer.
+            models.Index(fields=['user', 'is_read'], name='notif_user_unread_idx'),
+            models.Index(fields=['user', '-created_at'], name='notif_user_created_idx'),
+        ]
 
     def __str__(self):
         return f"{self.user.username} - {self.notification_type}"
