@@ -119,32 +119,46 @@ def create_work_request(request):
 
 
 def get_my_work_requests(request, user_id):
+    """Your own posted jobs — including applicant counts, who you assigned,
+    and closed/expired ones that never appear on the public board.
+
+    Self-only. The user_id in the path was previously trusted outright, so
+    anyone could read any user's posting history by changing the number.
+    """
     if request.method == "GET":
-        try:
-            user = User.objects.get(id=user_id)
-            requests = WorkRequest.objects.filter(created_by=user).order_by("-created_at")
-            data = [
-                {
-                    "id": wr.id,
-                    "description": wr.description,
-                    "skills": [s.name for s in wr.required_skills.all()],
-                    "payment_amount": wr.payment_amount,
-                    "time_limit_hours": wr.time_limit_hours,
-                    "gender_preference": getattr(wr, "gender_preference", "any"),
-                    "status": wr.status,
-                    "assigned_to": wr.assigned_to.username if wr.assigned_to else None,
-                    "assigned_to_id": wr.assigned_to_id,
-                    "completed_by_poster": wr.completed_by_poster,
-                    "completed_by_worker": wr.completed_by_worker,
-                    "expires_at": str(wr.expires_at),
-                    "responses_count": wr.responses.count(),
-                    "created_at": str(wr.created_at),
-                }
-                for wr in requests
-            ]
-            return JsonResponse({"work_requests": data, "count": len(data)})
-        except User.DoesNotExist:
-            return JsonResponse({"error": "User not found"}, status=404)
+        user, error = get_user_from_request(request)
+        if error:
+            return error
+        if user.id != user_id:
+            return JsonResponse({"error": "You can only view your own posts"}, status=403)
+
+        requests = (
+            WorkRequest.objects
+            .filter(created_by=user)
+            .select_related('assigned_to')
+            .prefetch_related('required_skills')
+            .order_by("-created_at")
+        )
+        data = [
+            {
+                "id": wr.id,
+                "description": wr.description,
+                "skills": [s.name for s in wr.required_skills.all()],
+                "payment_amount": wr.payment_amount,
+                "time_limit_hours": wr.time_limit_hours,
+                "gender_preference": getattr(wr, "gender_preference", "any"),
+                "status": wr.status,
+                "assigned_to": wr.assigned_to.username if wr.assigned_to else None,
+                "assigned_to_id": wr.assigned_to_id,
+                "completed_by_poster": wr.completed_by_poster,
+                "completed_by_worker": wr.completed_by_worker,
+                "expires_at": str(wr.expires_at),
+                "responses_count": wr.responses.count(),
+                "created_at": str(wr.created_at),
+            }
+            for wr in requests
+        ]
+        return JsonResponse({"work_requests": data, "count": len(data)})
 
     return JsonResponse({"error": "Method not allowed"}, status=405)
 
@@ -290,9 +304,19 @@ def respond_to_work_request(request, work_request_id):
 
 
 def get_work_request_responses(request, work_request_id):
+    """Applicants for one of YOUR jobs.
+
+    Owner-only: this returns each applicant's identity, skills, rating and the
+    pitch they wrote, which is private between them and the poster. It used to
+    be unauthenticated, so anyone could walk the id range and harvest every
+    applicant on the platform. (collab's equivalent was already owner-scoped.)
+    """
     if request.method == "GET":
+        user, error = get_user_from_request(request)
+        if error:
+            return error
         try:
-            work_request = WorkRequest.objects.get(id=work_request_id)
+            work_request = WorkRequest.objects.get(id=work_request_id, created_by=user)
             responses = WorkRequestResponse.objects.filter(
                 work_request=work_request, status='accepted'
             ).select_related("user")
@@ -310,7 +334,9 @@ def get_work_request_responses(request, work_request_id):
             ]
             return JsonResponse({"applicants": data, "count": len(data)})
         except WorkRequest.DoesNotExist:
-            return JsonResponse({"error": "Work request not found"}, status=404)
+            # Same response whether it doesn't exist or isn't yours — don't
+            # confirm the existence of other people's jobs.
+            return JsonResponse({"error": "Work request not found or not yours"}, status=404)
 
     return JsonResponse({"error": "Method not allowed"}, status=405)
 

@@ -1477,29 +1477,6 @@ def get_student_profile(request, user_id):
 
 
 
-def test_email(request):
-    import threading
-    import os
-
-    def _send():
-        from django.core.mail import send_mail
-        try:
-            send_mail(
-                subject='DoitHere Test',
-                message='Test email',
-                from_email=None,
-                recipient_list=[os.environ.get('EMAIL_HOST_USER')],
-                fail_silently=False,
-            )
-        except Exception as e:
-            logger.error("Email error: %s", e)
-
-    thread = threading.Thread(target=_send)
-    thread.daemon = True
-    thread.start()
-
-    return JsonResponse({'message': 'Email sending in background - check inbox in 30 seconds'})
-
 def health(request):
     return JsonResponse({'status': 'ok'})
 

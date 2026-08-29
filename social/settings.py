@@ -175,8 +175,16 @@ for _origin in [
     if _origin not in CORS_ALLOWED_ORIGINS:
         CORS_ALLOWED_ORIGINS.append(_origin)
 
-# Any Vercel preview/production deployment (*.vercel.app)
-CORS_ALLOWED_ORIGIN_REGEXES = [r"^https://.*\.vercel\.app$"]
+# Vercel preview deployments for THIS project only.
+# This was `^https://.*\.vercel\.app$`, which trusted every site on
+# vercel.app — anyone can deploy there, so that handed an allowed origin to
+# any third party who wanted one. Scoped to the project's own deploy URLs
+# (skillmap-frontend-<hash>-<scope>.vercel.app, and the -git-<branch> form).
+CORS_ALLOWED_ORIGIN_REGEXES = [r"^https://skillmap-frontend[a-z0-9\-]*\.vercel\.app$"]
+
+# Cookies are never sent cross-origin — auth is a Bearer header, so there's
+# no reason to widen this.
+CORS_ALLOW_CREDENTIALS = False
 
 # Django needs these to trust the domain for admin/CSRF over HTTPS.
 CSRF_TRUSTED_ORIGINS = [
