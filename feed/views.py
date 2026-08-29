@@ -79,8 +79,10 @@ def format_item(item, request):
             }
             for m in item.media.all()
         ],
-        "reactions": item.reactions.count(),
-        "comments": item.comments.count(),
+        # len() over the prefetched cache — .count() issues a fresh
+        # query per item, which is an N+1 across a whole feed page.
+        "reactions": len(item.reactions.all()),
+        "comments": len(item.comments.all()),
         "latitude": item.latitude,
         "longitude": item.longitude,
         "created_at": item.created_at,
@@ -160,6 +162,14 @@ def _ts(dt):
     return dt.timestamp() if dt else 0
 
 
+# The ranked feeds score candidates in Python, so an unbounded queryset means
+# every request's cost grows with the whole table — and the client polls the
+# feed on a timer. Cap the candidate set to the most recent N of each kind:
+# ranking quality is unaffected in practice (older posts never won a slot
+# anyway) and per-request work stays flat as the platform grows.
+FEED_CANDIDATE_CAP = 400
+
+
 def smart_feed(request):
     """For You — open freelance jobs + collab posts, ranked by how well they
     match the viewer's skills/category (falls back to most-recent)."""
@@ -185,6 +195,7 @@ def smart_feed(request):
         .select_related('created_by', 'created_by__category')
         .prefetch_related('required_skills')
         .annotate(responses_count=Count('responses', distinct=True))
+        .order_by('-created_at')[:FEED_CANDIDATE_CAP]
     )
     for wr in open_jobs:
         sk = {s.name.lower() for s in wr.required_skills.all()}
@@ -197,10 +208,15 @@ def smart_feed(request):
 
     open_collabs = (
         CollabPost.objects.filter(status='open')
+        # Collabs expire like jobs do, but this filter was missing here — an
+        # elapsed collab kept surfacing in the feed (rendering as "Expired")
+        # even though the collab board itself already hid it.
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
         .exclude(user=user).exclude(user_id__in=blocked)
         .select_related('user', 'user__category')
         .prefetch_related('skills_needed')
         .annotate(applicants_count=Count('requests', distinct=True))
+        .order_by('-created_at')[:FEED_CANDIDATE_CAP]
     )
     for cp in open_collabs:
         sk = {s.name.lower() for s in cp.skills_needed.all()}
@@ -309,6 +325,7 @@ def trending_feed(request):
         .select_related('created_by', 'created_by__category')
         .prefetch_related('required_skills')
         .annotate(responses_count=Count('responses', distinct=True))
+        .order_by('-created_at')[:FEED_CANDIDATE_CAP]
     )
     for wr in open_jobs:
         # Prefer the job's own (live) location, fall back to the poster's profile.
@@ -321,10 +338,15 @@ def trending_feed(request):
 
     open_collabs = (
         CollabPost.objects.filter(status='open')
+        # Collabs expire like jobs do, but this filter was missing here — an
+        # elapsed collab kept surfacing in the feed (rendering as "Expired")
+        # even though the collab board itself already hid it.
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
         .exclude(user=user).exclude(user_id__in=blocked)
         .select_related('user', 'user__category')
         .prefetch_related('skills_needed')
         .annotate(applicants_count=Count('requests', distinct=True))
+        .order_by('-created_at')[:FEED_CANDIDATE_CAP]
     )
     for cp in open_collabs:
         dist = None

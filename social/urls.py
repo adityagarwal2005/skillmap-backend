@@ -84,10 +84,6 @@ urlpatterns = [
     path("users/blocked/", csrf_exempt(user_views.get_blocked_users)),
     path("reports/create/", csrf_exempt(user_views.report_content)),
 
-    # Student Profile
-    path("users/<int:user_id>/student-profile/", csrf_exempt(user_views.get_student_profile)),
-    path("users/<int:user_id>/student-profile/add/", csrf_exempt(user_views.add_student_profile)),
-    path("users/<int:user_id>/student-profile/edit/", csrf_exempt(user_views.edit_student_profile)),
 
     # Skills
     path("users/<int:user_id>/skills/add/", csrf_exempt(skill_views.add_skill)),

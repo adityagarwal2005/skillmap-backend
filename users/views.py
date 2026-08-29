@@ -3,7 +3,7 @@ from django.conf import settings
 from django.contrib.auth.hashers import make_password, check_password
 from django.core.mail import send_mail
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import User, StudentProfile, OTPVerification, PhoneOTPVerification, Block, Report, SkillEndorsement, Friendship
+from .models import User, OTPVerification, PhoneOTPVerification, Block, Report, SkillEndorsement, Friendship
 from skills.models import Category, Skill
 import random
 import threading
@@ -1378,103 +1378,6 @@ def discover_users(request):
     } for u in qs[:limit]]
 
     return JsonResponse({'results': results})
-
-
-def add_student_profile(request, user_id):
-    if request.method == "POST":
-        user, error = get_user_from_token(request)
-        if error:
-            return error
-
-        if user.id != user_id:
-            return JsonResponse({"error": "You can only add your own student profile"}, status=403)
-
-        if not user.category or user.category.name.lower() != "student":
-            return JsonResponse({"error": "User is not in Student category"}, status=400)
-
-        if StudentProfile.objects.filter(user=user).exists():
-            return JsonResponse({"error": "Student profile already exists"}, status=400)
-
-        education_type = request.POST.get("education_type", "").strip().lower()
-        if education_type not in ["school", "college"]:
-            return JsonResponse({"error": "education_type must be 'school' or 'college'"}, status=400)
-
-        if education_type == "college":
-            degree_name = request.POST.get("degree_name", "").strip()
-            current_year = request.POST.get("current_year", "").strip()
-            if not degree_name or not current_year:
-                return JsonResponse({"error": "degree_name and current_year are required"}, status=400)
-            StudentProfile.objects.create(
-                user=user,
-                education_type="college",
-                degree_name=degree_name,
-                current_year=int(current_year),
-            )
-        else:
-            current_class = request.POST.get("current_class", "").strip()
-            if not current_class:
-                return JsonResponse({"error": "current_class is required"}, status=400)
-            StudentProfile.objects.create(
-                user=user,
-                education_type="school",
-                current_class=int(current_class),
-            )
-
-        return JsonResponse({"message": "Student profile created successfully"}, status=201)
-
-    return JsonResponse({"error": "Method not allowed"}, status=405)
-
-
-def edit_student_profile(request, user_id):
-    if request.method == "POST":
-        user, error = get_user_from_token(request)
-        if error:
-            return error
-
-        if user.id != user_id:
-            return JsonResponse({"error": "You can only edit your own student profile"}, status=403)
-
-        try:
-            profile = StudentProfile.objects.get(user=user)
-            degree_name = request.POST.get("degree_name", "").strip()
-            current_year = request.POST.get("current_year", "").strip()
-            current_class = request.POST.get("current_class", "").strip()
-
-            if degree_name:
-                profile.degree_name = degree_name
-            if current_year:
-                profile.current_year = int(current_year)
-            if current_class:
-                profile.current_class = int(current_class)
-
-            profile.save()
-            return JsonResponse({"message": "Student profile updated"})
-        except StudentProfile.DoesNotExist:
-            return JsonResponse({"error": "Student profile not found"}, status=404)
-
-    return JsonResponse({"error": "Method not allowed"}, status=405)
-
-
-def get_student_profile(request, user_id):
-    if request.method == "GET":
-        try:
-            user = User.objects.get(id=user_id)
-            profile = StudentProfile.objects.get(user=user)
-            return JsonResponse({
-                "username": user.username,
-                "education_type": profile.education_type,
-                "degree_name": profile.degree_name,
-                "current_year": profile.current_year,
-                "current_class": profile.current_class,
-                "skills": [s.name for s in user.skills.all()],
-            })
-        except User.DoesNotExist:
-            return JsonResponse({"error": "User not found"}, status=404)
-        except StudentProfile.DoesNotExist:
-            return JsonResponse({"error": "Student profile not found"}, status=404)
-
-    return JsonResponse({"error": "Method not allowed"}, status=405)
-
 
 
 def health(request):

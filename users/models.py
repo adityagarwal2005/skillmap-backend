@@ -41,25 +41,6 @@ class User(models.Model):
         return self.username
 
 
-class StudentProfile(models.Model):
-    EDUCATION_TYPE_CHOICES = [
-        ('school', 'School'),
-        ('college', 'College'),
-    ]
-
-    user = models.OneToOneField(User, on_delete=models.CASCADE)
-    education_type = models.CharField(max_length=10, choices=EDUCATION_TYPE_CHOICES)
-    degree_name = models.CharField(max_length=255, null=True, blank=True)
-    current_year = models.IntegerField(null=True, blank=True)
-    current_class = models.IntegerField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True, null=True)
-
-    def __str__(self):
-        return f"{self.user.username} - {self.education_type}"
-    
-
-from django.utils import timezone
-
 class OTPVerification(models.Model):
     email   = models.EmailField()
     otp     = models.CharField(max_length=6)

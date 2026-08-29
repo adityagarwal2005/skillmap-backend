@@ -1,6 +1,6 @@
 from django.contrib import admin
 from .models import (
-    User, StudentProfile, OTPVerification, Block,
+    User, OTPVerification, Block,
     SkillEndorsement, PushSubscription, Report,
 )
 
@@ -44,12 +44,6 @@ class ReportAdmin(admin.ModelAdmin):
 class BlockAdmin(admin.ModelAdmin):
     list_display = ('id', 'blocker', 'blocked', 'created_at')
     search_fields = ('blocker__username', 'blocked__username')
-
-
-@admin.register(StudentProfile)
-class StudentProfileAdmin(admin.ModelAdmin):
-    list_display = ('id', 'user', 'education_type', 'degree_name', 'current_year')
-    search_fields = ('user__username',)
 
 
 admin.site.register(OTPVerification)
