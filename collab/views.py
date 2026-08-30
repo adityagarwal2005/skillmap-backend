@@ -63,6 +63,12 @@ def create_collab_post(request):
             time_limit_hours = None
         expires_at = timezone.now() + timedelta(hours=time_limit_hours) if time_limit_hours else None
 
+        try:
+            people_needed = int(request.POST.get("people_needed", 1))
+        except (TypeError, ValueError):
+            people_needed = 1
+        people_needed = max(1, min(people_needed, 5))
+
         from users.views import upload_media_file
         media_url, media_type = upload_media_file(request.FILES.get("media"))
         post = CollabPost.objects.create(
@@ -74,6 +80,7 @@ def create_collab_post(request):
             longitude=float(longitude) if longitude else None,
             range_km=float(range_km) if range_km else None,
             time_limit_hours=time_limit_hours,
+            people_needed=people_needed,
             expires_at=expires_at,
             media=media_url,
             media_type=media_type,
@@ -121,10 +128,16 @@ def show_collab_posts(request):
     longitude    = request.GET.get('longitude')
 
     from users.models import Block
-    from django.db.models import Count
+    from django.db.models import Count, Q
     blocked = set(Block.objects.filter(blocker=user).values_list('blocked_id', flat=True))
     blocked_by = set(Block.objects.filter(blocked=user).values_list('blocker_id', flat=True))
     hidden = blocked | blocked_by
+
+    # Declined applicants stop seeing the post they were turned down for.
+    declined_posts = set(
+        CollabRequest.objects.filter(applicant=user, status='declined')
+        .values_list('collab_post_id', flat=True)
+    )
 
     # select_related/prefetch_related + annotate so the loop below doesn't
     # issue a fresh query per post for the owner's username, skills list,
@@ -133,7 +146,10 @@ def show_collab_posts(request):
         CollabPost.objects.filter(status='open')
         .select_related('user')
         .prefetch_related('skills_needed')
-        .annotate(applicants_count=Count('requests', distinct=True))
+        .annotate(
+            applicants_count=Count('requests', distinct=True),
+            hired_count=Count('requests', filter=Q(requests__status='accepted'), distinct=True),
+        )
     )
 
     now = timezone.now()
@@ -141,6 +157,8 @@ def show_collab_posts(request):
     results = []
     for post in posts:
         if post.user_id in hidden:
+            continue
+        if post.id in declined_posts:
             continue
 
         # Hide collabs whose visibility window has elapsed (nothing auto-closes
@@ -186,6 +204,8 @@ def show_collab_posts(request):
             'posted_by':    post.user.username,
             'skills_needed':[s.name for s in post.skills_needed.all()],
             'applicants':   post.applicants_count,
+            'people_needed': getattr(post, 'people_needed', 1) or 1,
+            'hired_count':  post.hired_count,
             'distance_km':  dist_display,
             'expires_at':   str(post.expires_at) if getattr(post, 'expires_at', None) else None,
             'media':        post.media or None,
@@ -217,6 +237,8 @@ def show_my_collab_posts(request):
                 "status": p.status,
                 "skills_needed": [s.name for s in p.skills_needed.all()],
                 "applicants": p.requests.count(),
+                "people_needed": getattr(p, 'people_needed', 1) or 1,
+                "hired_count": sum(1 for r in p.requests.all() if r.status == 'accepted'),
                 "expires_at": str(p.expires_at) if getattr(p, 'expires_at', None) else None,
                 "created_at": p.created_at,
             }
@@ -305,7 +327,15 @@ def get_collab_applicants(request, post_id):
                 }
                 for r in applicants
             ]
-            return JsonResponse({"applicants": data, "count": len(data)})
+            people_needed = getattr(post, 'people_needed', 1) or 1
+            hired_count = sum(1 for r in data if r["status"] == 'accepted')
+            return JsonResponse({
+                "applicants": data,
+                "count": len(data),
+                "people_needed": people_needed,
+                "hired_count": hired_count,
+                "spots_left": max(0, people_needed - hired_count),
+            })
 
         except CollabPost.DoesNotExist:
             return JsonResponse({"error": "Post not found or not yours"}, status=404)
@@ -334,9 +364,30 @@ def respond_to_collab_request(request, request_id):
                 id=request_id,
                 collab_post__user=user
             )
+            post = collab_request.collab_post
+            people_needed = getattr(post, 'people_needed', 1) or 1
+
+            if status == 'accepted':
+                if collab_request.status == 'accepted':
+                    return JsonResponse({"error": "You've already accepted this person"}, status=400)
+                accepted_count = CollabRequest.objects.filter(
+                    collab_post=post, status='accepted'
+                ).count()
+                if accepted_count >= people_needed:
+                    return JsonResponse(
+                        {"error": f"All {people_needed} spot(s) are already filled"}, status=400
+                    )
 
             collab_request.status = status
             collab_request.save()
+
+            # Close the post once every spot is taken so it drops out of
+            # everyone else's feed; a partly-filled collab stays open.
+            if status == 'accepted':
+                filled = CollabRequest.objects.filter(collab_post=post, status='accepted').count()
+                if filled >= people_needed and post.status == 'open':
+                    post.status = 'closed'
+                    post.save(update_fields=['status'])
 
             from notifications.utils import notify
             ntype = 'proposal_accepted' if status == 'accepted' else 'proposal_declined'

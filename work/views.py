@@ -85,6 +85,13 @@ def create_work_request(request):
         gender_preference = request.POST.get("gender_preference", "any").strip().lower()
         if gender_preference not in ("any", "male", "female"):
             gender_preference = "any"
+
+        # Clamp rather than reject: a bad value shouldn't fail the whole post.
+        try:
+            people_needed = int(request.POST.get("people_needed", 1))
+        except (TypeError, ValueError):
+            people_needed = 1
+        people_needed = max(1, min(people_needed, 5))
         from users.views import upload_media_file
         media_url, media_type = upload_media_file(request.FILES.get("media"))
         work_request = WorkRequest.objects.create(
@@ -93,6 +100,7 @@ def create_work_request(request):
             payment_amount=float(payment_amount),
             time_limit_hours=int(time_limit_hours),
             gender_preference=gender_preference,
+            people_needed=people_needed,
             expires_at=expires_at,
             status='open',
             latitude=float(latitude) if latitude else None,
@@ -136,7 +144,7 @@ def get_my_work_requests(request, user_id):
             WorkRequest.objects
             .filter(created_by=user)
             .select_related('assigned_to')
-            .prefetch_related('required_skills')
+            .prefetch_related('required_skills', 'responses')
             .order_by("-created_at")
         )
         data = [
@@ -147,6 +155,8 @@ def get_my_work_requests(request, user_id):
                 "payment_amount": wr.payment_amount,
                 "time_limit_hours": wr.time_limit_hours,
                 "gender_preference": getattr(wr, "gender_preference", "any"),
+                "people_needed": getattr(wr, "people_needed", 1) or 1,
+                "hired_count": sum(1 for r in wr.responses.all() if getattr(r, 'hired', False)),
                 "status": wr.status,
                 "assigned_to": wr.assigned_to.username if wr.assigned_to else None,
                 "assigned_to_id": wr.assigned_to_id,
@@ -317,9 +327,15 @@ def get_work_request_responses(request, work_request_id):
             return error
         try:
             work_request = WorkRequest.objects.get(id=work_request_id, created_by=user)
-            responses = WorkRequestResponse.objects.filter(
-                work_request=work_request, status='accepted'
-            ).select_related("user")
+            responses = (
+                WorkRequestResponse.objects
+                .filter(work_request=work_request, status='accepted')
+                # Rejected applicants stay in the table (so they stop seeing
+                # the gig) but drop out of the poster's actionable list.
+                .exclude(rejected=True)
+                .select_related("user")
+                .prefetch_related("user__skills")
+            )
 
             data = [
                 {
@@ -328,11 +344,20 @@ def get_work_request_responses(request, work_request_id):
                     "skills": [s.name for s in r.user.skills.all()],
                     "rating": r.user.rating,
                     "message": r.message,
+                    "hired": r.hired,
                     "responded_at": str(r.created_at),
                 }
                 for r in responses
             ]
-            return JsonResponse({"applicants": data, "count": len(data)})
+            people_needed = getattr(work_request, 'people_needed', 1) or 1
+            hired_count = sum(1 for r in data if r["hired"])
+            return JsonResponse({
+                "applicants": data,
+                "count": len(data),
+                "people_needed": people_needed,
+                "hired_count": hired_count,
+                "spots_left": max(0, people_needed - hired_count),
+            })
         except WorkRequest.DoesNotExist:
             # Same response whether it doesn't exist or isn't yours — don't
             # confirm the existence of other people's jobs.
@@ -363,13 +388,36 @@ def assign_work_request(request, work_request_id):
 
             assignee = User.objects.get(id=assignee_id)
 
-            if not WorkRequestResponse.objects.filter(
+            response = WorkRequestResponse.objects.filter(
                 work_request=work_request, user=assignee, status='accepted'
-            ).exists():
-                return JsonResponse({"error": "This user has not accepted the request"}, status=400)
+            ).exclude(rejected=True).first()
+            if not response:
+                return JsonResponse({"error": "This user has not applied to this gig"}, status=400)
 
-            work_request.assigned_to = assignee
-            work_request.status = 'assigned'
+            people_needed = getattr(work_request, 'people_needed', 1) or 1
+            hired_qs = WorkRequestResponse.objects.filter(work_request=work_request, hired=True)
+
+            if response.hired:
+                return JsonResponse({"error": "You've already hired this person"}, status=400)
+            if hired_qs.count() >= people_needed:
+                return JsonResponse(
+                    {"error": f"All {people_needed} spot(s) are already filled"}, status=400
+                )
+
+            response.hired = True
+            response.save(update_fields=['hired'])
+
+            # assigned_to holds the FIRST hire — completion/rating and the
+            # existing 1:1 conversation still key off it, so multi-hire gigs
+            # stay compatible with everything built around a single worker.
+            if work_request.assigned_to is None:
+                work_request.assigned_to = assignee
+
+            # Only leave 'open' once every spot is taken; a partly-filled gig
+            # must stay visible so the remaining spots can still be applied to.
+            hired_count = hired_qs.count()
+            if hired_count >= people_needed:
+                work_request.status = 'assigned'
             work_request.save()
 
             # Reuse an existing 1:1 conversation with this person (from a friend
@@ -398,7 +446,11 @@ def assign_work_request(request, work_request_id):
 
             return JsonResponse({
                 "message": f"Work assigned to {assignee.username} successfully",
-                "conversation_id": conversation.id
+                "conversation_id": conversation.id,
+                "people_needed": people_needed,
+                "hired_count": hired_count,
+                "spots_left": max(0, people_needed - hired_count),
+                "is_full": hired_count >= people_needed,
             })
 
         except WorkRequest.DoesNotExist:
@@ -428,12 +480,19 @@ def reject_work_applicant(request, work_request_id):
     except WorkRequest.DoesNotExist:
         return JsonResponse({"error": "Work request not found or not yours"}, status=404)
 
-    deleted, _ = WorkRequestResponse.objects.filter(
+    response = WorkRequestResponse.objects.filter(
         work_request=work_request, user_id=applicant_id
-    ).delete()
-    if not deleted:
-        return JsonResponse({"error": "That applicant was not found on this job"}, status=404)
+    ).first()
+    if not response:
+        return JsonResponse({"error": "That applicant was not found on this gig"}, status=404)
+    if response.hired:
+        return JsonResponse({"error": "You've already hired this person"}, status=400)
 
+    # Flagged, not deleted. Deleting let them re-apply and put the gig back in
+    # their feed; keeping the row is what makes the rejection stick and hides
+    # the gig from them for good.
+    response.rejected = True
+    response.save(update_fields=['rejected'])
     return JsonResponse({"message": "Applicant declined"})
 
 

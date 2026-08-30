@@ -128,6 +128,8 @@ def _job_item(wr, request, distance=None):
         'created_at': str(wr.created_at) if wr.created_at else None,
         'payment_amount': wr.payment_amount,
         'gender_preference': getattr(wr, 'gender_preference', 'any'),
+        'people_needed': getattr(wr, 'people_needed', 1) or 1,
+        'hired_count': getattr(wr, 'hired_count', 0) or 0,
         'expires_at': str(wr.expires_at) if wr.expires_at else None,
         'responses_count': count,
         'distance_km': distance,
@@ -150,6 +152,8 @@ def _collab_item(cp, request, distance=None):
         'created_at': str(cp.created_at) if cp.created_at else None,
         'collab_type': cp.collab_type,
         'applicants': count,
+        'people_needed': getattr(cp, 'people_needed', 1) or 1,
+        'hired_count': getattr(cp, 'hired_count', 0) or 0,
         'expires_at': str(cp.expires_at) if getattr(cp, 'expires_at', None) else None,
         'distance_km': distance,
         'media': cp.media or None,
@@ -186,15 +190,30 @@ def smart_feed(request):
     blocked = set(Block.objects.filter(blocker=user).values_list('blocked_id', flat=True))
     blocked |= set(Block.objects.filter(blocked=user).values_list('blocker_id', flat=True))
 
+    # A rejected applicant shouldn't keep seeing the post they were turned down
+    # for — it's noise to them and awkward for the poster.
+    from work.models import WorkRequestResponse as _WRR
+    from collab.models import CollabRequest as _CR
+    rejected_jobs = set(
+        _WRR.objects.filter(user=user, rejected=True).values_list('work_request_id', flat=True)
+    )
+    rejected_collabs = set(
+        _CR.objects.filter(applicant=user, status='declined').values_list('collab_post_id', flat=True)
+    )
+
     scored = []  # (score, created_at, kind, obj)
 
     open_jobs = (
         WorkRequest.objects.filter(status='open')
         .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
         .exclude(created_by=user).exclude(created_by_id__in=blocked)
+        .exclude(id__in=rejected_jobs)
         .select_related('created_by', 'created_by__category')
         .prefetch_related('required_skills')
-        .annotate(responses_count=Count('responses', distinct=True))
+        .annotate(
+            responses_count=Count('responses', distinct=True),
+            hired_count=Count('responses', filter=Q(responses__hired=True), distinct=True),
+        )
         .order_by('-created_at')[:FEED_CANDIDATE_CAP]
     )
     for wr in open_jobs:
@@ -213,9 +232,13 @@ def smart_feed(request):
         # even though the collab board itself already hid it.
         .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
         .exclude(user=user).exclude(user_id__in=blocked)
+        .exclude(id__in=rejected_collabs)
         .select_related('user', 'user__category')
         .prefetch_related('skills_needed')
-        .annotate(applicants_count=Count('requests', distinct=True))
+        .annotate(
+            applicants_count=Count('requests', distinct=True),
+            hired_count=Count('requests', filter=Q(requests__status='accepted'), distinct=True),
+        )
         .order_by('-created_at')[:FEED_CANDIDATE_CAP]
     )
     for cp in open_collabs:
@@ -314,6 +337,17 @@ def trending_feed(request):
 
     blocked = set(Block.objects.filter(blocker=user).values_list('blocked_id', flat=True))
     blocked |= set(Block.objects.filter(blocked=user).values_list('blocker_id', flat=True))
+
+    # A rejected applicant shouldn't keep seeing the post they were turned down
+    # for — it's noise to them and awkward for the poster.
+    from work.models import WorkRequestResponse as _WRR
+    from collab.models import CollabRequest as _CR
+    rejected_jobs = set(
+        _WRR.objects.filter(user=user, rejected=True).values_list('work_request_id', flat=True)
+    )
+    rejected_collabs = set(
+        _CR.objects.filter(applicant=user, status='declined').values_list('collab_post_id', flat=True)
+    )
     has_loc = user.latitude is not None and user.longitude is not None
 
     entries = []  # (distance_or_None, popularity, created_at, kind, obj)
@@ -322,9 +356,13 @@ def trending_feed(request):
         WorkRequest.objects.filter(status='open')
         .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
         .exclude(created_by=user).exclude(created_by_id__in=blocked)
+        .exclude(id__in=rejected_jobs)
         .select_related('created_by', 'created_by__category')
         .prefetch_related('required_skills')
-        .annotate(responses_count=Count('responses', distinct=True))
+        .annotate(
+            responses_count=Count('responses', distinct=True),
+            hired_count=Count('responses', filter=Q(responses__hired=True), distinct=True),
+        )
         .order_by('-created_at')[:FEED_CANDIDATE_CAP]
     )
     for wr in open_jobs:
@@ -343,9 +381,13 @@ def trending_feed(request):
         # even though the collab board itself already hid it.
         .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
         .exclude(user=user).exclude(user_id__in=blocked)
+        .exclude(id__in=rejected_collabs)
         .select_related('user', 'user__category')
         .prefetch_related('skills_needed')
-        .annotate(applicants_count=Count('requests', distinct=True))
+        .annotate(
+            applicants_count=Count('requests', distinct=True),
+            hired_count=Count('requests', filter=Q(requests__status='accepted'), distinct=True),
+        )
         .order_by('-created_at')[:FEED_CANDIDATE_CAP]
     )
     for cp in open_collabs:

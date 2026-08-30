@@ -22,6 +22,10 @@ class WorkRequest(models.Model):
     payment_amount = models.FloatField()
     time_limit_hours = models.IntegerField()
     gender_preference = models.CharField(max_length=10, choices=GENDER_CHOICES, default='any')
+    # How many people this gig needs. 1 keeps the original behaviour; up to 5
+    # lets one post hire a small team (e.g. "need 2 for a hackathon") instead
+    # of forcing the poster to create the same gig several times.
+    people_needed = models.PositiveSmallIntegerField(default=1)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='open')
     assigned_to = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_work')
     latitude = models.FloatField(null=True, blank=True)
@@ -56,7 +60,14 @@ class WorkRequestResponse(models.Model):
 
     work_request = models.ForeignKey(WorkRequest, on_delete=models.CASCADE, related_name='responses')
     user = models.ForeignKey(User, on_delete=models.CASCADE)
+    # `status` is the APPLICANT's action ('accepted' = they applied). The two
+    # flags below are the POSTER's decision, which previously had nowhere to
+    # live: hiring was a single WorkRequest.assigned_to FK (so only one person
+    # could ever be hired) and rejecting deleted the row outright.
     status = models.CharField(max_length=10, choices=STATUS_CHOICES)
+    hired = models.BooleanField(default=False)
+    # Kept rather than deleted, so a rejected applicant stops seeing the gig.
+    rejected = models.BooleanField(default=False)
     message = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, null=True)
 
