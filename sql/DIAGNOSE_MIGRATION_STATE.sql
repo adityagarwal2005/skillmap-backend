@@ -1,0 +1,56 @@
+-- DIAGNOSTIC: which migrations has Django NOT recorded as applied?
+-- Read-only. Paste into the Supabase SQL Editor and send me the output.
+WITH expected(app, name) AS (VALUES
+    ('users','0001_initial'),
+    ('users','0002_otpverification'),
+    ('users','0003_user_instagram_url'),
+    ('users','0004_user_dob'),
+    ('users','0005_user_profile_image'),
+    ('users','0006_block_report'),
+    ('users','0007_user_headline_bio'),
+    ('users','0008_profileviews_endorsements'),
+    ('users','0009_user_whatsapp'),
+    ('users','0010_pushsubscription'),
+    ('users','0011_user_invited_by'),
+    ('users','0012_friendship'),
+    ('users','0013_user_google_sub'),
+    ('users','0014_phoneotpverification_user_phone_verified'),
+    ('users','0015_delete_studentprofile'),
+    ('skills','0001_initial'),
+    ('skills','0002_initial'),
+    ('skills','0003_delete_certificate'),
+    ('work','0001_initial'),
+    ('work','0002_workrequest_location'),
+    ('work','0003_message_media'),
+    ('work','0004_workrequest_media'),
+    ('work','0005_workrequest_range_km'),
+    ('work','0006_workrequest_completion'),
+    ('work','0007_conversation_collab_post'),
+    ('work','0008_message_read_at_typingstatus'),
+    ('work','0009_workrequest_gender_preference'),
+    ('work','0010_hot_path_indexes'),
+    ('work','0011_alter_message_media_type'),
+    ('collab','0001_initial'),
+    ('collab','0002_collabrequest_latitude_collabrequest_longitude'),
+    ('collab','0003_collabpost_latitude_longitude'),
+    ('collab','0004_collabpost_media'),
+    ('collab','0005_collabpost_range_km'),
+    ('collab','0006_collabtask'),
+    ('collab','0007_collabpost_visibility'),
+    ('collab','0008_hot_path_indexes'),
+    ('portfolio','0001_initial'),
+    ('portfolio','0002_portfolioitem_latitude_portfolioitem_longitude_and_more'),
+    ('portfolio','0003_portfolioitem_verified_and_more'),
+    ('portfolio','0004_alter_portfolioitem_portfolio_type'),
+    ('notifications','0001_initial'),
+    ('notifications','0002_notification_friend_types'),
+    ('notifications','0003_notification_actor'),
+    ('notifications','0004_notification_collab_match_type'),
+    ('notifications','0005_hot_path_indexes'),
+    ('reviews','0001_initial')
+)
+SELECT e.app, e.name
+FROM expected e
+LEFT JOIN django_migrations m ON m.app = e.app AND m.name = e.name
+WHERE m.id IS NULL
+ORDER BY e.app, e.name;
