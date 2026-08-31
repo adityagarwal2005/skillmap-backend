@@ -1,1 +1,1 @@
-web: python manage.py migrate --noinput || echo "!!! MIGRATE FAILED — see sql/RECONCILE_MIGRATION_STATE_SUPABASE.sql !!!"; python manage.py collectstatic --noinput || true; python manage.py seed_categories --replace || true; gunicorn social.wsgi --log-file - --timeout 120 --workers 1 --threads 4
+web: python manage.py migrate_safe || echo "!!! MIGRATE FAILED — schema may be behind the code !!!"; python manage.py collectstatic --noinput || true; python manage.py seed_categories --replace || true; gunicorn social.wsgi --log-file - --timeout 120 --workers 1 --threads 4

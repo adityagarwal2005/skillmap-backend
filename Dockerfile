@@ -21,14 +21,14 @@ ENV PYTHONUNBUFFERED=1 \
 # listen on it — everything else here mirrors the existing Procfile exactly
 # (same migrate/collectstatic/seed-then-serve sequence Render already runs),
 # so behavior doesn't change just because the host did.
-# `|| true` on migrate is deliberate — a bad migration must not take the
-# service down — but a bare `|| true` also made a FAILING migrate invisible.
-# It failed on every boot for weeks (tables applied by hand in the Supabase
-# editor were never recorded, so migrate re-attempted and aborted), which
-# silently meant no later migration could ever apply. The banner below makes
-# that state greppable in Cloud Run logs and alertable.
-CMD python manage.py migrate --noinput \
-      || echo "!!! MIGRATE FAILED — schema may be behind the code. See sql/RECONCILE_MIGRATION_STATE_SUPABASE.sql !!!"; \
+# migrate_safe, not migrate: schema here is sometimes applied by hand in the
+# Supabase editor, which makes plain `migrate` abort on "already exists" and
+# silently skip every migration behind it. migrate_safe records those and
+# carries on, while still failing loudly on a genuinely broken migration.
+# The `|| echo` keeps a bad migration from taking the service down, while
+# leaving a greppable, alertable banner in the logs (a bare `|| true` hid it).
+CMD python manage.py migrate_safe \
+      || echo "!!! MIGRATE FAILED — schema may be behind the code !!!"; \
     python manage.py collectstatic --noinput || true; \
     python manage.py seed_categories --replace || true; \
     exec gunicorn social.wsgi --bind 0.0.0.0:${PORT:-8080} --log-file - --timeout 120 --workers 1 --threads 4
