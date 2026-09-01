@@ -31,4 +31,4 @@ CMD python manage.py migrate_safe \
       || echo "!!! MIGRATE FAILED — schema may be behind the code !!!"; \
     python manage.py collectstatic --noinput || true; \
     python manage.py seed_categories --replace || true; \
-    exec gunicorn social.wsgi --bind 0.0.0.0:${PORT:-8080} --log-file - --timeout 120 --workers 1 --threads 4
+    exec gunicorn social.wsgi --bind 0.0.0.0:${PORT:-8080} --log-file - --timeout 120 --workers 1 --threads 8
