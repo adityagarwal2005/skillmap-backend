@@ -61,6 +61,10 @@ INSTALLED_APPS = [
 # MIDDLEWARE
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # Compresses every API response — smaller payloads mean less Cloud Run
+    # vCPU/GiB-second billing per request and less egress (this region has
+    # no free Cloud Run egress tier, so every byte out is billed).
+    'django.middleware.gzip.GZipMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
 
     'corsheaders.middleware.CorsMiddleware',
