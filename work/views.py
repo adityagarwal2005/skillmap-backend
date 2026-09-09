@@ -6,6 +6,7 @@ from .models import WorkRequest, WorkRequestResponse, WorkProposal, Conversation
 from users.models import User
 # Skill/Category are reached via skills.utils now (see create_work_request).
 from users.views import get_user_from_token, require_contact
+from social.validators import parse_lat, parse_lon, parse_float
 
 
 def get_distance_km(lat1, lon1, lat2, lon2):
@@ -79,6 +80,15 @@ def create_work_request(request):
         except ValueError:
             return JsonResponse({"error": "time_limit_hours must be a number"}, status=400)
 
+        # time_limit_hours was validated above but payment_amount never was,
+        # so a non-numeric (or negative) budget reached float() and 500'd.
+        try:
+            payment_amount = float(payment_amount)
+        except (TypeError, ValueError):
+            return JsonResponse({"error": "payment_amount must be a number"}, status=400)
+        if payment_amount < 0:
+            return JsonResponse({"error": "payment_amount cannot be negative"}, status=400)
+
         latitude = request.POST.get("latitude", "").strip()
         longitude = request.POST.get("longitude", "").strip()
         range_km = request.POST.get("range_km", "").strip()
@@ -97,15 +107,15 @@ def create_work_request(request):
         work_request = WorkRequest.objects.create(
             created_by=user,
             description=description,
-            payment_amount=float(payment_amount),
+            payment_amount=payment_amount,
             time_limit_hours=int(time_limit_hours),
             gender_preference=gender_preference,
             people_needed=people_needed,
             expires_at=expires_at,
             status='open',
-            latitude=float(latitude) if latitude else None,
-            longitude=float(longitude) if longitude else None,
-            range_km=float(range_km) if range_km else None,
+            latitude=parse_lat(latitude),
+            longitude=parse_lon(longitude),
+            range_km=parse_float(range_km, None, minimum=0) if range_km else None,
             media=media_url,
             media_type=media_type,
         )
@@ -179,9 +189,9 @@ def get_available_work_requests(request, user_id):
         return error
 
     skill_filter = request.GET.get('skill', '').strip().lower()
-    radius_km    = float(request.GET.get('radius', 50))
-    latitude     = request.GET.get('latitude')
-    longitude    = request.GET.get('longitude')
+    radius_km    = parse_float(request.GET.get('radius'), 50, minimum=0)
+    latitude     = parse_lat(request.GET.get('latitude'))
+    longitude    = parse_lon(request.GET.get('longitude'))
 
     from users.models import Block
     blocked = set(Block.objects.filter(blocker=user).values_list('blocked_id', flat=True))
@@ -218,10 +228,10 @@ def get_available_work_requests(request, user_id):
         dist_display = None
         job_lat = wr.latitude if wr.latitude is not None else wr.created_by.latitude
         job_lon = wr.longitude if wr.longitude is not None else wr.created_by.longitude
-        if latitude and longitude:
+        if latitude is not None and longitude is not None:
             if job_lat is not None and job_lon is not None:
                 distance = get_distance_km(
-                    float(latitude), float(longitude),
+                    latitude, longitude,
                     job_lat, job_lon
                 )
                 # The poster's chosen range caps visibility; the searcher's

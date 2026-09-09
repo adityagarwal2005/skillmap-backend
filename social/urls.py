@@ -165,13 +165,4 @@ urlpatterns = [
     path("collab/tasks/<int:task_id>/toggle/", csrf_exempt(collab_views.toggle_collab_task)),
     path("collab/tasks/<int:task_id>/assign/", csrf_exempt(collab_views.assign_collab_task)),
     path("collab/tasks/<int:task_id>/delete/", csrf_exempt(collab_views.delete_collab_task)),
-
-
-    #temp
-
-   #cron-job , health
-   path('health/', user_views.health),
-
-   #temporary registration
-   path('users/register/', csrf_exempt(user_views.register)),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

@@ -314,7 +314,10 @@ def search_feed(request):
             items = list(items)
             items.sort(key=lambda x: relevance_score(x, search_words), reverse=True)
 
-        total = items.count() if hasattr(items, 'count') else len(items)
+        # list.count() exists but needs an argument, so hasattr('count') was
+        # true for both branches and raised TypeError on every query that
+        # sorted by relevance or filtered by radius (both return a list).
+        total = len(items) if isinstance(items, list) else items.count()
         limit, offset = parse_pagination(request)
         page = items[offset:offset + limit]
 

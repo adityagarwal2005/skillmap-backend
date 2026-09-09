@@ -3,6 +3,7 @@ from .models import PortfolioItem, Media, Reaction, Comment
 from users.models import User
 from skills.models import Skill, Tag
 from users.views import get_user_from_token
+from social.validators import parse_lat, parse_lon, parse_float
 
 
 def get_user_from_request(request):
@@ -35,8 +36,8 @@ def create_portfolio_item(request):
             title=title,
             description=description,
             portfolio_type=portfolio_type,
-            latitude=float(latitude) if latitude else None,
-            longitude=float(longitude) if longitude else None,
+            latitude=parse_lat(latitude),
+            longitude=parse_lon(longitude),
         )
 
         # add skills (optional) — known skills attach as skills; anything we

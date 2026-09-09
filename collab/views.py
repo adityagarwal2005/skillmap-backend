@@ -5,6 +5,7 @@ from users.models import User
 # Skill is reached via skills.utils now (see create_collab_post).
 from users.views import get_user_from_token, require_contact
 from work.views import get_distance_km
+from social.validators import parse_lat, parse_lon, parse_float
 
 
 def get_user_from_request(request):
@@ -76,9 +77,9 @@ def create_collab_post(request):
             title=title,
             description=description,
             collab_type='experience',   # collab has no money deal — type removed
-            latitude=float(latitude) if latitude else None,
-            longitude=float(longitude) if longitude else None,
-            range_km=float(range_km) if range_km else None,
+            latitude=parse_lat(latitude),
+            longitude=parse_lon(longitude),
+            range_km=parse_float(range_km, None, minimum=0) if range_km else None,
             time_limit_hours=time_limit_hours,
             people_needed=people_needed,
             expires_at=expires_at,
@@ -123,9 +124,9 @@ def show_collab_posts(request):
 
     skill_filter = request.GET.get('skill', '').strip().lower()
     collab_type  = request.GET.get('type', '').strip()
-    radius_km    = float(request.GET.get('radius', 50))
-    latitude     = request.GET.get('latitude')
-    longitude    = request.GET.get('longitude')
+    radius_km    = parse_float(request.GET.get('radius'), 50, minimum=0)
+    latitude     = parse_lat(request.GET.get('latitude'))
+    longitude    = parse_lon(request.GET.get('longitude'))
 
     from users.models import Block
     from django.db.models import Count, Q
@@ -181,9 +182,9 @@ def show_collab_posts(request):
         # can't be verified as "nearby", so they're excluded from a location
         # search (rather than falsely shown as within range).
         dist_display = None
-        if latitude and longitude:
+        if latitude is not None and longitude is not None:
             if post.latitude is not None and post.longitude is not None:
-                distance = get_distance_km(float(latitude), float(longitude), post.latitude, post.longitude)
+                distance = get_distance_km(latitude, longitude, post.latitude, post.longitude)
                 # The poster's chosen range caps visibility; the searcher's radius
                 # narrows it further. A post is shown only within both.
                 limit = radius_km

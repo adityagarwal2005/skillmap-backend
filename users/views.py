@@ -10,6 +10,7 @@ import threading
 import resend
 import os
 import logging
+from social.validators import parse_lat, parse_lon, parse_float
 
 logger = logging.getLogger(__name__)
 
@@ -490,13 +491,22 @@ def send_otp(request):
 
 def verify_otp_and_register(request):
     if request.method == 'POST':
-        username    = request.POST.get('username')
-        email       = request.POST.get('email')
-        password    = request.POST.get('password')
-        otp         = request.POST.get('otp')
+        username    = (request.POST.get('username') or '').strip()
+        email       = (request.POST.get('email') or '').strip()
+        password    = request.POST.get('password') or ''
+        otp         = (request.POST.get('otp') or '').strip()
         latitude    = request.POST.get('latitude')
         longitude   = request.POST.get('longitude')
         referred_by = request.POST.get('referred_by', '').strip()
+
+        # Without this the missing field reached User.objects.create() and
+        # surfaced as a 500 from the NOT NULL / unique constraint instead of
+        # a message the signup form could show.
+        if not username or not email or not password or not otp:
+            return JsonResponse(
+                {'error': 'Username, email, password and OTP are all required.'},
+                status=400,
+            )
 
         guard = check_otp_attempts(email)
         if guard:
@@ -515,6 +525,15 @@ def verify_otp_and_register(request):
 
         if User.objects.filter(username=username).exists():
             return JsonResponse({'error': 'This username is already taken.'}, status=400)
+
+        # send_otp checks this too, but the address can be claimed in the gap
+        # between requesting the code and submitting it — without the recheck
+        # that race ends as a unique-constraint 500 on create() below.
+        if User.objects.filter(email=email).exists():
+            return JsonResponse(
+                {'error': 'This email is already registered. Please login instead.'},
+                status=400,
+            )
 
         guard = validate_password_strength(password, user=User(username=username, email=email))
         if guard:
@@ -535,8 +554,8 @@ def verify_otp_and_register(request):
             username=username,
             email=email,
             password=make_password(password),
-            latitude=float(latitude) if latitude else None,
-            longitude=float(longitude) if longitude else None,
+            latitude=parse_lat(latitude),
+            longitude=parse_lon(longitude),
             invited_by=referrer,
         )
 
@@ -552,6 +571,8 @@ def verify_otp_and_register(request):
             'access':  tokens['access'],
             'refresh': tokens['refresh'],
         }, status=201)
+
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 
 def change_password(request, user_id):
@@ -926,8 +947,8 @@ def google_login(request):
                 email=email,
                 password=make_password(None),  # unusable — this account only signs in via Google
                 google_sub=sub,
-                latitude=float(latitude) if latitude else None,
-                longitude=float(longitude) if longitude else None,
+                latitude=parse_lat(latitude),
+                longitude=parse_lon(longitude),
                 invited_by=referrer,
             )
             is_new_user = True
@@ -1096,14 +1117,19 @@ def get_user(request, user_id):
                 "rating": user.rating,
                 "review_count": _safe_review_count(user),
                 "profile_views": user.profile_views,
-                "latitude": user.latitude,
-                "longitude": user.longitude,
+                # Same reasoning as email above: this endpoint answers to
+                # anonymous callers, so exact coordinates would let anyone
+                # walk the ID range and map where every user physically is.
+                # Proximity is already served as a computed distance by the
+                # feed; nothing needs raw coordinates off someone else.
+                "latitude": user.latitude if is_self else None,
+                "longitude": user.longitude if is_self else None,
                 "linkedin_url": user.linkedin_url,
                 "github_url": user.github_url,
                 "instagram_url": user.instagram_url,
                 "whatsapp": user.whatsapp,
                 "phone_verified": user.phone_verified,
-                "dob": user.dob,
+                "dob": user.dob if is_self else None,
                 "headline": user.headline,
                 "bio": user.bio,
                 "profile_image": request.build_absolute_uri(user.profile_image.url) if user.profile_image else None,
@@ -1187,10 +1213,10 @@ def edit_user(request, user_id):
         # requires the current password and runs the strength validators;
         # this one didn't, so it silently bypassed both if anyone hit the
         # API directly. The frontend never posts `password` here anyway.
-        if latitude:
-            user.latitude = float(latitude)
-        if longitude:
-            user.longitude = float(longitude)
+        if parse_lat(latitude) is not None:
+            user.latitude = parse_lat(latitude)
+        if parse_lon(longitude) is not None:
+            user.longitude = parse_lon(longitude)
         for field_name, value in (
             ('linkedin_url', linkedin_url),
             ('github_url', github_url),
@@ -1379,45 +1405,6 @@ def discover_users(request):
 
     return JsonResponse({'results': results})
 
-
-def health(request):
-    return JsonResponse({'status': 'ok'})
-
-
-def register(request):
-    if request.method == 'POST':
-        username  = request.POST.get('username')
-        email     = request.POST.get('email')
-        password  = request.POST.get('password')
-        latitude  = request.POST.get('latitude')
-        longitude = request.POST.get('longitude')
-
-        if User.objects.filter(username=username).exists():
-            return JsonResponse({'error': 'This username is already taken. Please choose another.'}, status=400)
-
-        if User.objects.filter(email=email).exists():
-            return JsonResponse({'error': 'This email is already registered. Please login instead.'}, status=400)
-
-        guard = validate_password_strength(password, user=User(username=username, email=email))
-        if guard:
-            return guard
-
-        user = User.objects.create(
-            username=username,
-            email=email,
-            password=make_password(password),
-            latitude=float(latitude) if latitude else None,
-            longitude=float(longitude) if longitude else None,
-        )
-
-        tokens = get_tokens_for_user(user)
-        return JsonResponse({
-            'message': f'Welcome to DoitHere, {username}!',
-            'user_id': user.id,
-            'username': user.username,
-            'access':  tokens['access'],
-            'refresh': tokens['refresh'],
-        }, status=201)
 
 def get_my_referrals(request):
     """Everyone who signed up using the logged-in user's invite link."""
