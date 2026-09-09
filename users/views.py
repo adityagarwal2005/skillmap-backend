@@ -1168,6 +1168,12 @@ def endorse_skill(request, user_id):
     if not skill:
         return JsonResponse({"error": "Skill is required"}, status=400)
 
+    # Endorsements are only ever read back against the skills the target
+    # actually lists, so an arbitrary string just wrote a row nothing could
+    # display — an open-ended way to grow a size-capped database.
+    if not target.skills.filter(name__iexact=skill).exists():
+        return JsonResponse({"error": "That user doesn't list this skill"}, status=400)
+
     existing = SkillEndorsement.objects.filter(user=target, endorser=endorser, skill=skill).first()
     if existing:
         existing.delete()
