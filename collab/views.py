@@ -5,7 +5,7 @@ from users.models import User
 # Skill is reached via skills.utils now (see create_collab_post).
 from users.views import get_user_from_token, require_contact
 from work.views import get_distance_km
-from social.validators import parse_lat, parse_lon, parse_float
+from social.validators import parse_lat, parse_lon, parse_float, MAX_VISIBILITY_HOURS
 
 
 def get_user_from_request(request):
@@ -62,6 +62,10 @@ def create_collab_post(request):
             time_limit_hours = int(tlh) if tlh else None
         except ValueError:
             time_limit_hours = None
+        # Same ceiling the gig side enforces — a collab shouldn't be able to
+        # outlive the 48h the picker offers just by posting a bigger number.
+        if time_limit_hours is not None:
+            time_limit_hours = max(1, min(time_limit_hours, MAX_VISIBILITY_HOURS))
         expires_at = timezone.now() + timedelta(hours=time_limit_hours) if time_limit_hours else None
 
         try:

@@ -5,6 +5,11 @@ client sending "abc" (or a scanner probing the API) turned into a 500
 instead of a handled response.
 """
 
+# How long a gig or collab may stay visible. The create form offers
+# 2/6/12/24/48h; this is the ceiling both create views clamp to so the
+# limit holds for anything posting to the API directly.
+MAX_VISIBILITY_HOURS = 48
+
 
 def parse_coord(value):
     """A latitude/longitude from request data, or None if unusable.

@@ -6,7 +6,7 @@ from .models import WorkRequest, WorkRequestResponse, WorkProposal, Conversation
 from users.models import User
 # Skill/Category are reached via skills.utils now (see create_work_request).
 from users.views import get_user_from_token, require_contact
-from social.validators import parse_lat, parse_lon, parse_float
+from social.validators import parse_lat, parse_lon, parse_float, MAX_VISIBILITY_HOURS
 
 
 def get_distance_km(lat1, lon1, lat2, lon2):
@@ -76,9 +76,14 @@ def create_work_request(request):
                 skill_objects.append(skill)
 
         try:
-            expires_at = timezone.now() + timedelta(hours=int(time_limit_hours))
+            time_limit_hours = int(time_limit_hours)
         except ValueError:
             return JsonResponse({"error": "time_limit_hours must be a number"}, status=400)
+        # The picker only offers 2–48h, but the field is a plain POST value,
+        # so the ceiling has to hold here too or a listing can be made to
+        # sit on the board indefinitely.
+        time_limit_hours = max(1, min(time_limit_hours, MAX_VISIBILITY_HOURS))
+        expires_at = timezone.now() + timedelta(hours=time_limit_hours)
 
         # time_limit_hours was validated above but payment_amount never was,
         # so a non-numeric (or negative) budget reached float() and 500'd.
@@ -108,7 +113,7 @@ def create_work_request(request):
             created_by=user,
             description=description,
             payment_amount=payment_amount,
-            time_limit_hours=int(time_limit_hours),
+            time_limit_hours=time_limit_hours,
             gender_preference=gender_preference,
             people_needed=people_needed,
             expires_at=expires_at,
