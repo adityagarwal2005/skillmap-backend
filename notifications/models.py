@@ -14,6 +14,10 @@ class Notification(models.Model):
         ('comment', 'Comment'),
         ('referral', 'Referral'),
         ('job_complete', 'Job Complete'),
+        # Asking one side to confirm a completion: job_review goes to the
+        # poster, job_confirm to a hire, so each opens the right screen.
+        ('job_review', 'Job Review'),
+        ('job_confirm', 'Job Confirm'),
         ('friend_request', 'Friend Request'),
         ('friend_accepted', 'Friend Accepted'),
         ('collab_match', 'Collab Match'),

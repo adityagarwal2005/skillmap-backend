@@ -444,13 +444,19 @@ def assign_work_request(request, work_request_id):
                  if c.participants.count() == 2),
                 None,
             )
+            # Conversation.work_request is one-to-one, so only one thread can
+            # carry the gig. The second hire on a multi-person gig used to create
+            # another linked thread and 500 on the constraint. Each hire still
+            # gets a private thread; hires aren't pooled into one, since the
+            # first could be an existing DM whose history isn't theirs to see.
+            gig_linked = Conversation.objects.filter(work_request=work_request).exists()
             if conversation:
-                if conversation.work_request_id is None:
+                if conversation.work_request_id is None and not gig_linked:
                     conversation.work_request = work_request
                     conversation.save(update_fields=['work_request'])
             else:
                 conversation = Conversation.objects.create(
-                    work_request=work_request,
+                    work_request=None if gig_linked else work_request,
                     conversation_type='freelance'
                 )
                 conversation.participants.add(user, assignee)
@@ -477,8 +483,8 @@ def assign_work_request(request, work_request_id):
 
 
 def reject_work_applicant(request, work_request_id):
-    """Post owner declines an applicant. Deletes their WorkRequestResponse so
-    the applicant is removed and is free to apply to the same job again."""
+    """Post owner declines an applicant. The decline is permanent: the
+    applicant is told, and the gig drops out of their feed for good."""
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
@@ -508,49 +514,19 @@ def reject_work_applicant(request, work_request_id):
     # the gig from them for good.
     response.rejected = True
     response.save(update_fields=['rejected'])
+
+    # Gig declines were silent while collab declines already notified; the
+    # applicant was left refreshing a status that had quietly changed.
+    from notifications.utils import notify
+    notify(response.user, 'proposal_declined',
+           f"Your application for \"{work_request.description[:50]}\" wasn't selected", actor=user)
     return JsonResponse({"message": "Applicant declined"})
 
 
 def close_work_request(request, work_request_id):
-    if request.method == "POST":
-        user, error = get_user_from_request(request)
-        if error:
-            return error
-
-        try:
-            work_request = WorkRequest.objects.get(id=work_request_id, created_by=user)
-            work_request.status = 'closed'
-            work_request.save()
-
-            if work_request.assigned_to:
-                from portfolio.models import PortfolioItem
-                item = PortfolioItem.objects.create(
-                    user=work_request.assigned_to,
-                    title=f"Completed: {work_request.description[:80]}",
-                    description="Completed work for a client. Verified on DoitHere.",
-                    portfolio_type='project',
-                    verified=True,
-                    verified_via_work=work_request,
-                )
-                item.skills.set(work_request.required_skills.all())
-                return JsonResponse({
-                    "message": "Work request closed",
-                    "portfolio_item_created": True,
-                    "portfolio_item_id": item.id,
-                })
-
-            return JsonResponse({"message": "Work request closed"})
-
-        except WorkRequest.DoesNotExist:
-            return JsonResponse({"error": "Work request not found or not yours"}, status=404)
-
-    return JsonResponse({"error": "Method not allowed"}, status=405)
-
-
-def complete_work_request(request, work_request_id):
-    """Mutual completion: both the poster and the hired worker must confirm
-    before a job actually closes. Prevents one side unilaterally declaring a
-    job 'done' and lets us prompt both to rate each other once it's final."""
+    """Take a gig off the board early. Closing is not completing: verified
+    projects only come from mutual completion, otherwise a poster could close
+    a gig the hire never did and still award them one."""
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
@@ -559,51 +535,90 @@ def complete_work_request(request, work_request_id):
         return error
 
     try:
-        wr = WorkRequest.objects.get(id=work_request_id)
+        work_request = WorkRequest.objects.get(id=work_request_id, created_by=user)
+    except WorkRequest.DoesNotExist:
+        return JsonResponse({"error": "Work request not found or not yours"}, status=404)
+
+    if work_request.status != 'closed':
+        work_request.status = 'closed'
+        work_request.save(update_fields=['status'])
+    return JsonResponse({"message": "Work request closed"})
+
+
+def complete_work_request(request, work_request_id):
+    """Mutual completion: the poster and someone they hired must both confirm
+    before a gig closes, so neither side can declare it done alone. Any hire
+    can confirm for the workers, a partly staffed gig can still finish, and
+    every hire gets a verified project once it closes."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    user, error = get_user_from_request(request)
+    if error:
+        return error
+
+    try:
+        wr = WorkRequest.objects.select_related('created_by').get(id=work_request_id)
     except WorkRequest.DoesNotExist:
         return JsonResponse({"error": "Job not found"}, status=404)
 
+    from django.db.models import Q
+    hired_ids = WorkRequestResponse.objects.filter(work_request=wr, hired=True).values('user_id')
+    hires = list(User.objects.filter(Q(id__in=hired_ids) | Q(id=wr.assigned_to_id)).distinct())
+
     is_poster = user.id == wr.created_by_id
-    is_worker = wr.assigned_to_id is not None and user.id == wr.assigned_to_id
+    is_worker = any(h.id == user.id for h in hires)
     if not (is_poster or is_worker):
         return JsonResponse({"error": "You're not part of this job"}, status=403)
-
-    if wr.status != 'assigned':
-        return JsonResponse({"error": "This job isn't in progress"}, status=400)
+    if wr.status == 'closed':
+        return JsonResponse({"error": "This job is already closed"}, status=400)
+    if not hires:
+        return JsonResponse({"error": "Hire someone before marking the job complete"}, status=400)
 
     from notifications.utils import notify
+    from django.utils import timezone
 
     if is_poster:
         wr.completed_by_poster = True
     else:
         wr.completed_by_worker = True
-
+    snippet = (wr.description or '')[:50]
+    poster = wr.created_by
     both_confirmed = wr.completed_by_poster and wr.completed_by_worker
 
     if both_confirmed:
-        from django.utils import timezone
         wr.status = 'closed'
         wr.completed_at = timezone.now()
         wr.save()
 
         from portfolio.models import PortfolioItem
-        if not PortfolioItem.objects.filter(verified_via_work=wr).exists():
+        skills = list(wr.required_skills.all())
+        for hire in hires:
+            if PortfolioItem.objects.filter(verified_via_work=wr, user=hire).exists():
+                continue
             item = PortfolioItem.objects.create(
-                user=wr.assigned_to,
-                title=f"Completed: {wr.description[:80]}",
+                user=hire,
+                title=f"Completed: {(wr.description or '')[:80]}",
                 description="Completed work for a client. Verified on DoitHere.",
                 portfolio_type='project',
                 verified=True,
                 verified_via_work=wr,
             )
-            item.skills.set(wr.required_skills.all())
+            item.skills.set(skills)
 
-        notify(wr.created_by, 'job_complete', "Job complete on both sides — rate each other!", actor=None)
-        notify(wr.assigned_to, 'job_complete', "Job complete on both sides — rate each other!", actor=None)
+        # One notification per pairing, each carrying the person to rate as
+        # its actor, so tapping it lands on the profile with the Rate button.
+        for hire in hires:
+            notify(hire, 'job_complete', f"Done on both sides: {snippet} — rate {poster.username}", actor=poster)
+            notify(poster, 'job_complete', f"Done on both sides: {snippet} — rate {hire.username}", actor=hire)
     else:
         wr.save()
-        other = wr.assigned_to if is_poster else wr.created_by
-        notify(other, 'job_complete', f"{user.username} marked the job complete — confirm to close it out", actor=user)
+        message = f'{user.username} marked "{snippet}" complete — confirm to close it out'
+        if is_poster:
+            for hire in hires:
+                notify(hire, 'job_confirm', message, actor=user)
+        else:
+            notify(poster, 'job_review', message, actor=user)
 
     return JsonResponse({
         "message": "Job marked complete by both sides" if both_confirmed else "Marked complete — waiting for the other side",
@@ -1078,9 +1093,6 @@ def get_my_applications(request):
             'payment_amount': wr.payment_amount,
             'completed_by_poster': wr.completed_by_poster,
             'completed_by_worker': wr.completed_by_worker,
-            # Only the first hire can run the completion handshake
-            # (complete_work_request checks assigned_to).
-            'is_primary_hire': wr.assigned_to_id == user.id,
             'people_needed': wr.people_needed or 1,
         })
 
