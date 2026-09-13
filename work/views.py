@@ -1042,15 +1042,28 @@ def get_my_applications(request):
 
     apps = []
 
+    from django.db.models import Count, Q
+    now = timezone.now()
+
     # Freelance: WorkRequestResponse.user == applicant
     for r in WorkRequestResponse.objects.filter(user=user).select_related(
         'work_request', 'work_request__created_by'
     ):
         wr = r.work_request
-        if wr.assigned_to_id == user.id:
+        # Hiring flags each response; assigned_to is only the *first* hire,
+        # kept for the 1:1 completion flow. Reading assigned_to alone told
+        # hires #2-#5 they'd been passed over, and a declined applicant was
+        # left on "pending" forever.
+        hired = r.hired or wr.assigned_to_id == user.id
+        expired = wr.expires_at is not None and wr.expires_at <= now
+        if hired:
             status = 'accepted'
-        elif wr.status in ('assigned', 'closed'):
-            status = 'filled'      # someone else was picked
+        elif r.rejected:
+            status = 'declined'
+        elif wr.status == 'assigned' or (wr.status == 'closed' and wr.assigned_to_id):
+            status = 'filled'
+        elif wr.status == 'closed' or expired:
+            status = 'closed'
         else:
             status = 'pending'
         apps.append({
@@ -1065,22 +1078,43 @@ def get_my_applications(request):
             'payment_amount': wr.payment_amount,
             'completed_by_poster': wr.completed_by_poster,
             'completed_by_worker': wr.completed_by_worker,
+            # Only the first hire can run the completion handshake
+            # (complete_work_request checks assigned_to).
+            'is_primary_hire': wr.assigned_to_id == user.id,
+            'people_needed': wr.people_needed or 1,
         })
 
     # Collab: CollabRequest.applicant == user
-    for cr in CollabRequest.objects.filter(applicant=user).select_related(
-        'collab_post', 'collab_post__user'
-    ):
+    collab_requests = (
+        CollabRequest.objects.filter(applicant=user)
+        .select_related('collab_post', 'collab_post__user')
+        .annotate(team_filled=Count(
+            'collab_post__requests',
+            filter=Q(collab_post__requests__status='accepted'),
+            distinct=True,
+        ))
+    )
+    for cr in collab_requests:
         cp = cr.collab_post
+        status = cr.status   # pending / accepted / declined
+        # A request still pending on a post that has since filled up, been
+        # closed, or run out of time will never be answered.
+        if status == 'pending':
+            if cr.team_filled >= (cp.people_needed or 1):
+                status = 'filled'
+            elif cp.status == 'closed' or (cp.expires_at and cp.expires_at <= now):
+                status = 'closed'
         apps.append({
             'kind': 'collab',
             'id': cp.id,
             'title': cp.title,
-            'status': cr.status,   # pending / accepted / declined
+            'status': status,
             'applied_at': str(cr.created_at) if cr.created_at else None,
             'posted_by': cp.user.username,
             'posted_by_id': cp.user.id,
             'collab_type': cp.collab_type,
+            'people_needed': cp.people_needed or 1,
+            'team_filled': cr.team_filled,
         })
 
     apps.sort(key=lambda a: a['applied_at'] or '', reverse=True)
