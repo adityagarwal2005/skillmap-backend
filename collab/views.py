@@ -64,9 +64,13 @@ def create_collab_post(request):
             time_limit_hours = None
         # Same ceiling the gig side enforces — a collab shouldn't be able to
         # outlive the 48h the picker offers just by posting a bigger number.
-        if time_limit_hours is not None:
-            time_limit_hours = max(1, min(time_limit_hours, MAX_VISIBILITY_HOURS))
-        expires_at = timezone.now() + timedelta(hours=time_limit_hours) if time_limit_hours else None
+        # A collab with no window would never expire, and the feed only shows
+        # listings inside their window, so it would never show either. A
+        # missing value gets the same 48h default as the create form.
+        if time_limit_hours is None:
+            time_limit_hours = MAX_VISIBILITY_HOURS
+        time_limit_hours = max(1, min(time_limit_hours, MAX_VISIBILITY_HOURS))
+        expires_at = timezone.now() + timedelta(hours=time_limit_hours)
 
         try:
             people_needed = int(request.POST.get("people_needed", 1))

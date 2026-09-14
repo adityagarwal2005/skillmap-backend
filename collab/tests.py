@@ -59,3 +59,13 @@ class CollabCapacityTests(ApiTestCase):
         url = f'/collab/{self.post.id}/applicants/'
         self.assertIn(self.get_as(self.ana, url).status_code, (403, 404))
         self.assertEqual(self.get_as(self.host, url).status_code, 200)
+
+
+class CollabWindowTests(ApiTestCase):
+    def test_a_collab_posted_without_a_window_gets_48_hours(self):
+        host = make_user('bandleader', contact=True)
+        r = self.post_as(host, '/collab/create/', {'title': 'Band', 'description': 'Need a drummer'})
+        self.assertIn(r.status_code, (200, 201), r.content)
+        post = CollabPost.objects.get(title='Band')
+        self.assertEqual(post.time_limit_hours, 48)
+        self.assertIsNotNone(post.expires_at)

@@ -3,6 +3,7 @@ from django.db.models import Q, Count
 from django.utils import timezone
 from users.models import Block
 from users.views import get_user_from_token
+from social.validators import parse_lat, parse_lon, parse_float
 import math
 from portfolio.models import PortfolioItem
 
@@ -174,9 +175,48 @@ def _ts(dt):
 FEED_CANDIDATE_CAP = 400
 
 
+DEFAULT_RADIUS_KM = 5.0
+MAX_RADIUS_KM = 50.0
+
+
+def _bbox(prefix, lat, lon, radius_km):
+    dlat = radius_km / 111.0
+    dlon = radius_km / (111.0 * max(math.cos(math.radians(lat)), 0.01))
+    return Q(**{
+        f'{prefix}latitude__gte': lat - dlat, f'{prefix}latitude__lte': lat + dlat,
+        f'{prefix}longitude__gte': lon - dlon, f'{prefix}longitude__lte': lon + dlon,
+    })
+
+
+def _near(owner, lat, lon, radius_km):
+    """Listings whose own pin, or failing that their poster's, falls inside
+    the box around the viewer. A cheap database prefilter, so the candidate
+    cap applies to nearby posts rather than to the newest posts anywhere; the
+    exact distance is checked per row afterwards."""
+    return _bbox('', lat, lon, radius_km) | (
+        Q(latitude__isnull=True) & _bbox(f'{owner}__', lat, lon, radius_km)
+    )
+
+
+def _listing_distance(obj, owner, lat, lon):
+    o_lat, o_lon = obj.latitude, obj.longitude
+    if o_lat is None or o_lon is None:
+        o_lat, o_lon = owner.latitude, owner.longitude
+    if o_lat is None or o_lon is None:
+        return None
+    return get_distance_km(lat, lon, o_lat, o_lon)
+
+
 def smart_feed(request):
-    """For You — open freelance jobs + collab posts, ranked by how well they
-    match the viewer's skills/category (falls back to most-recent)."""
+    """Open gigs and collabs within the viewer's range whose visibility window
+    is still running, ranked by how well they match the viewer's skills and
+    category, then by recency.
+
+    ?radius= is in km (default 5, max 50). ?lat=&lon= come from the device when
+    the app has a fresh fix; otherwise the location saved on the profile is
+    used. With neither there is nothing to measure "near" from, so the feed is
+    empty and says location_required rather than showing everything.
+    """
     result = get_user_from_token(request)
     user = result[0] if isinstance(result, tuple) else result
     if not user:
@@ -184,6 +224,16 @@ def smart_feed(request):
 
     from work.models import WorkRequest
     from collab.models import CollabPost
+
+    radius = parse_float(request.GET.get('radius'), DEFAULT_RADIUS_KM, minimum=0.1, maximum=MAX_RADIUS_KM)
+    lat, lon = parse_lat(request.GET.get('lat')), parse_lon(request.GET.get('lon'))
+    if lat is None or lon is None:
+        lat, lon = user.latitude, user.longitude
+    if lat is None or lon is None:
+        return JsonResponse({
+            'feed': [], 'count': 0, 'has_more': False,
+            'radius_km': radius, 'location_required': True,
+        })
 
     user_skills = {s.name.lower() for s in user.skills.all()}
     cat_id = user.category_id
@@ -201,11 +251,22 @@ def smart_feed(request):
         _CR.objects.filter(applicant=user, status='declined').values_list('collab_post_id', flat=True)
     )
 
-    scored = []  # (score, created_at, kind, obj)
+    # Only listings inside their window. One with no expiry at all predates
+    # the 48-hour rule and has no window to be inside, so it's left out too.
+    now = timezone.now()
+    scored = []  # (score, created_at, kind, obj, distance_km)
+
+    def score_for(skills, owner):
+        score = 2 * len(user_skills & skills)
+        if cat_id and owner.category_id == cat_id:
+            score += 3
+        if not user_skills and not cat_id:
+            score = 1
+        return score
 
     open_jobs = (
-        WorkRequest.objects.filter(status='open')
-        .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
+        WorkRequest.objects.filter(status='open', expires_at__gt=now)
+        .filter(_near('created_by', lat, lon, radius))
         .exclude(created_by=user).exclude(created_by_id__in=blocked)
         .exclude(id__in=rejected_jobs)
         .select_related('created_by', 'created_by__category')
@@ -217,20 +278,15 @@ def smart_feed(request):
         .order_by('-created_at')[:FEED_CANDIDATE_CAP]
     )
     for wr in open_jobs:
+        dist = _listing_distance(wr, wr.created_by, lat, lon)
+        if dist is None or dist > radius:
+            continue
         sk = {s.name.lower() for s in wr.required_skills.all()}
-        score = 2 * len(user_skills & sk)
-        if cat_id and wr.created_by.category_id == cat_id:
-            score += 3
-        if not user_skills and not cat_id:
-            score = 1
-        scored.append((score, wr.created_at, 'j', wr))
+        scored.append((score_for(sk, wr.created_by), wr.created_at, 'j', wr, dist))
 
     open_collabs = (
-        CollabPost.objects.filter(status='open')
-        # Collabs expire like jobs do, but this filter was missing here — an
-        # elapsed collab kept surfacing in the feed (rendering as "Expired")
-        # even though the collab board itself already hid it.
-        .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
+        CollabPost.objects.filter(status='open', expires_at__gt=now)
+        .filter(_near('user', lat, lon, radius))
         .exclude(user=user).exclude(user_id__in=blocked)
         .exclude(id__in=rejected_collabs)
         .select_related('user', 'user__category')
@@ -242,21 +298,27 @@ def smart_feed(request):
         .order_by('-created_at')[:FEED_CANDIDATE_CAP]
     )
     for cp in open_collabs:
+        dist = _listing_distance(cp, cp.user, lat, lon)
+        if dist is None or dist > radius:
+            continue
         sk = {s.name.lower() for s in cp.skills_needed.all()}
-        score = 2 * len(user_skills & sk)
-        if cat_id and cp.user.category_id == cat_id:
-            score += 3
-        if not user_skills and not cat_id:
-            score = 1
-        scored.append((score, cp.created_at, 'c', cp))
+        scored.append((score_for(sk, cp.user), cp.created_at, 'c', cp, dist))
 
     scored.sort(key=lambda x: (x[0], _ts(x[1])), reverse=True)
 
     limit, offset = parse_pagination(request)
     total = len(scored)
     page = scored[offset:offset + limit]
-    feed = [_job_item(o, request) if k == 'j' else _collab_item(o, request) for (_, _, k, o) in page]
-    return JsonResponse({'feed': feed, 'count': total, 'has_more': offset + limit < total})
+    feed = [
+        _job_item(o, request, distance=round(d, 1)) if k == 'j' else _collab_item(o, request, distance=round(d, 1))
+        for (_, _, k, o, d) in page
+    ]
+    return JsonResponse({
+        'feed': feed, 'count': total, 'has_more': offset + limit < total,
+        'radius_km': radius, 'location_required': False,
+    })
+
+
 def search_feed(request):
     if request.method == "GET":
         q = request.GET.get("q", "").strip()
