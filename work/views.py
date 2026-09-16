@@ -1,5 +1,5 @@
 from django.http import JsonResponse
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Count, Q
 from django.utils import timezone
 from datetime import timedelta
 from .models import WorkRequest, WorkRequestResponse, WorkProposal, Conversation, Message, TypingStatus
@@ -976,6 +976,35 @@ def start_conversation(request, user_id):
     return JsonResponse({"conversation_id": convo.id})
 
 
+def _chat_work_context(conversation, user):
+    """What a thread is about, so the inbox can say "Poster for the fest ·
+    ₹800" instead of just a username. Conversation.work_request is a
+    OneToOne, so on a gig hiring several people only the first chat carries
+    the link; the rest fall back to no context rather than guessing."""
+    wr = conversation.work_request
+    if wr:
+        return {
+            "kind": "freelance",
+            "id": wr.id,
+            "title": (wr.description or "").strip()[:70],
+            "payment_amount": wr.payment_amount,
+            "status": wr.status,
+            "is_poster": wr.created_by_id == user.id,
+            "completed_by_poster": wr.completed_by_poster,
+            "completed_by_worker": wr.completed_by_worker,
+        }
+    cp = conversation.collab_post
+    if cp:
+        return {
+            "kind": "collab",
+            "id": cp.id,
+            "title": cp.title,
+            "status": cp.status,
+            "is_poster": cp.user_id == user.id,
+        }
+    return None
+
+
 def get_my_conversations(request):
     if request.method == "GET":
         user, error = get_user_from_request(request)
@@ -989,9 +1018,15 @@ def get_my_conversations(request):
         # explicit ordering so it's fetched once, grouped by conversation.
         conversations = Conversation.objects.filter(
             participants=user
-        ).select_related("collab_post").prefetch_related(
+        ).select_related("collab_post", "work_request").prefetch_related(
             "participants",
             Prefetch("messages", queryset=Message.objects.order_by("-created_at"), to_attr="_ordered_messages"),
+        ).annotate(
+            unread=Count(
+                "messages",
+                filter=Q(messages__read_at__isnull=True) & ~Q(messages__sender=user),
+                distinct=True,
+            )
         )
 
         data = []
@@ -1027,6 +1062,8 @@ def get_my_conversations(request):
                     "with_avatar": request.build_absolute_uri(other.profile_image.url) if other and other.profile_image else None,
                 }
 
+            entry["work"] = _chat_work_context(c, user)
+            entry["unread"] = c.unread
             entry["last_message"] = last_message.text if last_message else None
             entry["last_message_at"] = str(last_message.created_at) if last_message else None
             entry["_activity_at"] = activity_at

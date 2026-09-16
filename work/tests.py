@@ -3,7 +3,7 @@ completion, and what applicants see about each of those."""
 from notifications.models import Notification
 from portfolio.models import PortfolioItem
 from social.testing import ApiTestCase, in_hours, make_user
-from work.models import Conversation, WorkRequest, WorkRequestResponse
+from work.models import Conversation, Message, WorkRequest, WorkRequestResponse
 
 
 def make_gig(poster, people_needed=1, **fields):
@@ -214,3 +214,55 @@ class ApplicationStatusTests(ApiTestCase):
         gig = make_gig(self.poster, expires_at=in_hours(-1))
         apply(gig, eve)
         self.assertEqual(self.status_for(eve, gig), 'closed')
+
+
+class InboxTests(ApiTestCase):
+    """The conversation list carries what each thread is about, and how much
+    of it you haven't read."""
+
+    def setUp(self):
+        self.poster = make_user('poster', contact=True)
+        self.ana = make_user('ana')
+        self.gig = make_gig(self.poster)   # make_gig already pays 800
+        apply(self.gig, self.ana)
+        self.post_as(self.poster, f'/work/requests/{self.gig.id}/assign/', {'assignee_id': self.ana.id})
+        self.chat = Conversation.objects.get(work_request=self.gig)
+
+    def inbox(self, user):
+        r = self.get_as(user, '/conversations/')
+        self.assertEqual(r.status_code, 200)
+        return r.json()['conversations']
+
+    def test_a_gig_chat_says_which_gig_it_is_about(self):
+        [entry] = self.inbox(self.poster)
+        self.assertEqual(entry['work']['kind'], 'freelance')
+        self.assertEqual(entry['work']['title'], self.gig.description[:70])
+        self.assertEqual(entry['work']['payment_amount'], 800)
+        self.assertTrue(entry['work']['is_poster'])
+
+    def test_the_hire_sees_the_same_gig_but_is_not_the_poster(self):
+        [entry] = self.inbox(self.ana)
+        self.assertEqual(entry['work']['id'], self.gig.id)
+        self.assertFalse(entry['work']['is_poster'])
+
+    def test_a_direct_chat_has_no_work_attached(self):
+        # Built directly: starting one through the API needs a friendship or
+        # shared work first, which is a different rule being tested elsewhere.
+        chat = Conversation.objects.create(conversation_type='direct')
+        chat.participants.add(self.ana, make_user('cal'))
+        entry = next(c for c in self.inbox(self.ana) if c['type'] == 'direct')
+        self.assertIsNone(entry['work'])
+        self.assertEqual(entry['unread'], 0)
+
+    def test_unread_counts_only_what_someone_else_sent(self):
+        Message.objects.create(conversation=self.chat, sender=self.ana, text='hi')
+        Message.objects.create(conversation=self.chat, sender=self.ana, text='ready when you are')
+        Message.objects.create(conversation=self.chat, sender=self.poster, text='great')
+        self.assertEqual(self.inbox(self.poster)[0]['unread'], 2)
+        self.assertEqual(self.inbox(self.ana)[0]['unread'], 1)
+
+    def test_opening_the_thread_clears_the_unread_count(self):
+        Message.objects.create(conversation=self.chat, sender=self.ana, text='hi')
+        self.assertEqual(self.inbox(self.poster)[0]['unread'], 1)
+        self.get_as(self.poster, f'/conversations/{self.chat.id}/messages/')
+        self.assertEqual(self.inbox(self.poster)[0]['unread'], 0)
