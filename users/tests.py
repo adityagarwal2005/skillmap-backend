@@ -1,7 +1,10 @@
 """Account safety: what a profile reveals, and the signup path."""
 import datetime
 
+from django.test import RequestFactory
 from django.utils import timezone
+
+from users import views as users_views
 
 from skills.utils import get_or_create_skill
 from social.testing import ApiTestCase, make_user
@@ -73,6 +76,29 @@ class SignupTests(ApiTestCase):
         r = self.post_as(user, '/users/phone/verify-otp/',
                          {'phone': '9876543210', 'otp': '121212'})
         self.assertEqual(r.status_code, 400, r.content)
+
+
+class ErrorReportPrivacyTests(ApiTestCase):
+    """Django emails ADMINS a full traceback on a 500, including the POST
+    body — which meant a real signup mailed out the password someone had
+    just typed. Marking the view's parameters replaces them with ********."""
+
+    def sensitive_for(self, view, path, data):
+        request = RequestFactory().post(path, data)
+        view(request)
+        return getattr(request, 'sensitive_post_parameters', ())
+
+    def test_signup_hides_the_password_and_code(self):
+        marked = self.sensitive_for(
+            users_views.verify_otp_and_register, '/users/verify-register/',
+            {'username': 'x', 'email': 'x@test.local', 'password': 'p', 'otp': '1'})
+        self.assertIn('password', marked)
+        self.assertIn('otp', marked)
+
+    def test_login_hides_the_password(self):
+        marked = self.sensitive_for(
+            users_views.login, '/users/login/', {'username': 'x', 'password': 'p'})
+        self.assertIn('password', marked)
 
 
 class EndorsementTests(ApiTestCase):

@@ -1,4 +1,5 @@
 from django.http import JsonResponse
+from django.views.decorators.debug import sensitive_post_parameters
 from django.conf import settings
 from django.contrib.auth.hashers import make_password, check_password
 from django.core.mail import send_mail
@@ -489,6 +490,7 @@ def send_otp(request):
 
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
+@sensitive_post_parameters('otp', 'password')
 def verify_otp_and_register(request):
     if request.method == 'POST':
         username    = (request.POST.get('username') or '').strip()
@@ -575,6 +577,7 @@ def verify_otp_and_register(request):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 
+@sensitive_post_parameters('current_password', 'new_password')
 def change_password(request, user_id):
     """Change password after verifying the current one."""
     if request.method == "POST":
@@ -639,6 +642,7 @@ def send_login_otp(request):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 
+@sensitive_post_parameters('otp')
 def verify_login_otp(request):
     """Verify a login code and sign the existing user in (no account created)."""
     if request.method == 'POST':
@@ -681,6 +685,7 @@ def verify_login_otp(request):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 
+@sensitive_post_parameters('new_password', 'otp')
 def reset_password_with_otp(request):
     """Forgot-password flow: verify the same email code used for OTP login,
     then set a new password directly. Reuses send_login_otp to send the code
@@ -800,6 +805,7 @@ def send_phone_otp(request):
     return JsonResponse({'message': f'Code sent to {raw_phone} on WhatsApp'})
 
 
+@sensitive_post_parameters('otp')
 def verify_phone_otp(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
@@ -844,6 +850,7 @@ LOGIN_MAX_ATTEMPTS = 5
 LOGIN_LOCKOUT_SECONDS = 15 * 60
 
 
+@sensitive_post_parameters('password')
 def login(request):
     if request.method == 'POST':
         identifier = (request.POST.get('username') or request.POST.get('identifier') or '').strip()
