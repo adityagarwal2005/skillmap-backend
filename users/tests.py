@@ -1,8 +1,11 @@
 """Account safety: what a profile reveals, and the signup path."""
 import datetime
 
+from django.utils import timezone
+
 from skills.utils import get_or_create_skill
 from social.testing import ApiTestCase, make_user
+from users.models import OTPVerification, PhoneOTPVerification, User
 
 
 class ProfilePrivacyTests(ApiTestCase):
@@ -37,6 +40,39 @@ class SignupTests(ApiTestCase):
 
     def test_verify_register_requires_every_field(self):
         self.assertEqual(self.client.post('/users/verify-register/', {}).status_code, 400)
+
+    # is_expired() called timezone.now() in a module that had stopped
+    # importing timezone, so every code check raised NameError and the last
+    # step of email signup was a 500. These cover both sides of that check.
+    def register(self, otp='552066', **overrides):
+        data = {'username': 'ashish', 'email': 'ashish@test.local',
+                'password': 'Str0ng!Passw0rd', 'otp': otp, **overrides}
+        return self.client.post('/users/verify-register/', data)
+
+    def test_a_valid_code_actually_creates_the_account(self):
+        OTPVerification.objects.create(email='ashish@test.local', otp='552066')
+        r = self.register()
+        self.assertIn(r.status_code, (200, 201), r.content)
+        self.assertTrue(User.objects.filter(username='ashish').exists())
+
+    def test_an_expired_code_is_refused_not_a_500(self):
+        otp = OTPVerification.objects.create(email='ashish@test.local', otp='552066')
+        # created_at is auto_now_add, so age it after the fact.
+        OTPVerification.objects.filter(pk=otp.pk).update(
+            created_at=timezone.now() - datetime.timedelta(minutes=11))
+        r = self.register()
+        self.assertEqual(r.status_code, 400, r.content)
+        self.assertIn('expired', r.json()['error'].lower())
+        self.assertFalse(User.objects.filter(username='ashish').exists())
+
+    def test_an_expired_phone_code_is_refused_not_a_500(self):
+        user = make_user('phoner')
+        otp = PhoneOTPVerification.objects.create(phone='9876543210', otp='121212')
+        PhoneOTPVerification.objects.filter(pk=otp.pk).update(
+            created_at=timezone.now() - datetime.timedelta(minutes=11))
+        r = self.post_as(user, '/users/phone/verify-otp/',
+                         {'phone': '9876543210', 'otp': '121212'})
+        self.assertEqual(r.status_code, 400, r.content)
 
 
 class EndorsementTests(ApiTestCase):

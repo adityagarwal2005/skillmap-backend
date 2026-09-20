@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 
 
 class User(models.Model):
@@ -48,7 +49,7 @@ class OTPVerification(models.Model):
     is_used = models.BooleanField(default=False)
 
     def is_expired(self):
-        return (timezone.now() - self.created_at).seconds > 600  # 10 min expiry
+        return (timezone.now() - self.created_at).total_seconds() > 600  # 10 min expiry
 
 
 class PhoneOTPVerification(models.Model):
@@ -59,7 +60,7 @@ class PhoneOTPVerification(models.Model):
     is_used = models.BooleanField(default=False)
 
     def is_expired(self):
-        return (timezone.now() - self.created_at).seconds > 600  # 10 min expiry
+        return (timezone.now() - self.created_at).total_seconds() > 600  # 10 min expiry
 
 
 class Block(models.Model):
