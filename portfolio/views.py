@@ -145,6 +145,52 @@ def show_portfolio_items(request):
     return JsonResponse({"error": "Method not allowed"}, status=405)
 
 
+def show_portfolio_item(request, item_id):
+    """One portfolio item, for its own page.
+
+    The detail page used to look the item up by scanning the feed, which
+    only ever carries gigs and collabs — so every project link from a
+    profile answered "Post not found", and an unrelated gig sharing the id
+    could render in its place.
+    """
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    try:
+        i = PortfolioItem.objects.select_related("user").prefetch_related(
+            "skills", "tags", "media", "reactions", "comments"
+        ).get(id=item_id)
+    except PortfolioItem.DoesNotExist:
+        return JsonResponse({"error": "Item not found"}, status=404)
+
+    return JsonResponse({
+        "id": i.id,
+        "title": i.title,
+        "description": i.description,
+        "portfolio_type": i.portfolio_type,
+        "verified": getattr(i, "verified", False),
+        "skills": [s.name for s in i.skills.all()],
+        "tags": [t.name for t in i.tags.all()],
+        "media": [
+            {
+                "id": m.id,
+                "media_type": m.media_type,
+                "url": m.url if m.url else request.build_absolute_uri(m.file.url) if m.file else None,
+                "order": m.order,
+            }
+            for m in i.media.all()
+        ],
+        "reactions": i.reactions.count(),
+        "comments": i.comments.count(),
+        "created_at": i.created_at,
+        "user": {
+            "id": i.user.id,
+            "username": i.user.username,
+            "category": i.user.category.name if i.user.category else None,
+            "profile_image": request.build_absolute_uri(i.user.profile_image.url) if i.user.profile_image else None,
+        },
+    })
+
+
 def show_user_portfolio(request, user_id):
     """Show a user's portfolio with optional skill/tag filtering"""
     if request.method == "GET":
