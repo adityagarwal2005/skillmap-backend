@@ -155,6 +155,10 @@ def show_portfolio_item(request, item_id):
     """
     if request.method != "GET":
         return JsonResponse({"error": "Method not allowed"}, status=405)
+    # Optional: the page is readable logged out, it just can't say which
+    # reaction is yours.
+    viewer, _ = get_user_from_request(request)
+
     try:
         i = PortfolioItem.objects.select_related("user").prefetch_related(
             "skills", "tags", "media", "reactions", "comments"
@@ -180,6 +184,17 @@ def show_portfolio_item(request, item_id):
             for m in i.media.all()
         ],
         "reactions": i.reactions.count(),
+        # Per-type counts and which one is yours: the page showed three
+        # buttons but could only ever track one, so love and like read as 0
+        # however many people had picked them.
+        "reaction_counts": {
+            kind: sum(1 for r in i.reactions.all() if r.reaction_type == kind)
+            for kind in ("fire", "love", "like")
+        },
+        "my_reaction": next(
+            (r.reaction_type for r in i.reactions.all() if viewer and r.user_id == viewer.id),
+            None,
+        ),
         "comments": i.comments.count(),
         "created_at": i.created_at,
         "user": {
