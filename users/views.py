@@ -1437,3 +1437,38 @@ def get_my_referrals(request):
     } for u in referred]
 
     return JsonResponse({'referrals': data, 'count': len(data)})
+
+
+def seo_indexable_profiles(request):
+    """Public list of profiles worth putting in the sitemap.
+
+    Only profiles with something real on them: a headline, a bio, or at
+    least one skill. A sitemap full of empty placeholder pages is worse
+    than a small one — thin, near-duplicate pages are exactly what search
+    engines discount a domain for, so an account that has signed up but
+    not filled anything in stays out until it has content.
+
+    No auth: it exposes nothing that isn't already on the public profile
+    page at /u/<username>.
+    """
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    qs = (
+        User.objects.exclude(username="")
+        .prefetch_related("skills")
+        .order_by("-created_at")
+    )
+
+    results = []
+    for u in qs:
+        has_text = bool((u.headline or "").strip() or (u.bio or "").strip())
+        if not (has_text or u.skills.exists()):
+            continue
+        updated = getattr(u, "updated_at", None) or getattr(u, "created_at", None)
+        results.append({
+            "username": u.username,
+            "updated": updated.date().isoformat() if updated else None,
+        })
+
+    return JsonResponse({"count": len(results), "results": results})

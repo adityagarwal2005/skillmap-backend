@@ -119,3 +119,39 @@ class EndorsementTests(ApiTestCase):
 
     def test_no_self_endorsement(self):
         self.assertEqual(self.endorse('Python', user=self.target).status_code, 400)
+
+
+class SeoProfileListTests(ApiTestCase):
+    """The sitemap feeds on this, so an empty profile must never reach it —
+    a sitemap full of thin, near-identical pages costs a domain more than
+    the extra URLs are worth."""
+
+    def get(self):
+        return self.client.get('/seo/profiles/')
+
+    def test_profile_with_a_headline_is_listed(self):
+        make_user('has_headline', headline='Backend engineer')
+        names = [r['username'] for r in self.get().json()['results']]
+        self.assertIn('has_headline', names)
+
+    def test_profile_with_only_a_skill_is_listed(self):
+        u = make_user('has_skill')
+        u.skills.add(get_or_create_skill('Python'))
+        names = [r['username'] for r in self.get().json()['results']]
+        self.assertIn('has_skill', names)
+
+    def test_empty_profile_is_left_out(self):
+        make_user('blank_slate')
+        names = [r['username'] for r in self.get().json()['results']]
+        self.assertNotIn('blank_slate', names)
+
+    def test_whitespace_only_headline_does_not_count_as_content(self):
+        make_user('spacey', headline='   ', bio='  ')
+        names = [r['username'] for r in self.get().json()['results']]
+        self.assertNotIn('spacey', names)
+
+    def test_readable_without_a_token(self):
+        make_user('anon_visible', bio='Real bio here')
+        res = self.get()
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()['count'], len(res.json()['results']))
