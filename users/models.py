@@ -3,12 +3,6 @@ from django.utils import timezone
 
 
 class User(models.Model):
-    STATUS_CHOICES = [
-        ('open_to_freelance', 'Open to Freelance'),
-        ('open_to_work', 'Open to Work'),
-        ('not_available', 'Not Available'),
-    ]
-
     username = models.CharField(max_length=100, unique=True)
     email = models.EmailField(unique=True)
     password = models.CharField(max_length=255)
@@ -35,7 +29,6 @@ class User(models.Model):
         'self', on_delete=models.SET_NULL, null=True, blank=True, related_name='referrals'
     )
     profile_image = models.ImageField(upload_to='avatars/', null=True, blank=True)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='not_available')
     created_at = models.DateTimeField(auto_now_add=True, null=True)
 
     def __str__(self):
@@ -156,3 +149,36 @@ class Friendship(models.Model):
 
     def __str__(self):
         return f"{self.requester.username} → {self.receiver.username} ({self.status})"
+
+class SavedAddress(models.Model):
+    """A place someone browses the feed from — "Home", "PG", "Office".
+
+    DoitHere is hyperlocal, so every listing is ranked against one pair of
+    coordinates. Until now that pair could only be the device's current fix
+    (or whatever was last written to the profile), which is wrong for the
+    normal case: you are at work and want to line up a shoot near your flat,
+    or you have come home for a week and the feed is still showing the city
+    you study in. Saving a few named places and switching between them is the
+    same affordance Swiggy and Zomato use, for the same reason.
+
+    `label` is unique per user so switching cannot be ambiguous, and a user
+    is capped at MAX_PER_USER so this never becomes a location history.
+    """
+
+    MAX_PER_USER = 8
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='addresses')
+    label = models.CharField(max_length=40)
+    # Free text the user typed ("Sector 34, Chandigarh"). Not geocoded — the
+    # coordinates are captured separately, so this is purely for recognition.
+    address = models.CharField(max_length=200, blank=True, default='')
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        unique_together = ('user', 'label')
+
+    def __str__(self):
+        return f"{self.user.username} — {self.label}"

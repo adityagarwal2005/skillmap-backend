@@ -55,12 +55,16 @@ urlpatterns = [
     path("users/login/verify-otp/", csrf_exempt(user_views.verify_login_otp)),
     path("users/password/reset/", csrf_exempt(user_views.reset_password_with_otp)),
     path("users/token/refresh/", csrf_exempt(user_views.refresh_token)),
-    path("users/status/update/", csrf_exempt(user_views.update_status)),
     path("users/phone/send-otp/", csrf_exempt(user_views.send_phone_otp)),
     path("users/phone/verify-otp/", csrf_exempt(user_views.verify_phone_otp)),
 
     # Users
     path("users/search/", csrf_exempt(user_views.search_users)),
+
+    # Saved places the feed can be pointed at (see users.models.SavedAddress)
+    path("users/addresses/", csrf_exempt(user_views.saved_addresses)),
+    path("users/addresses/<int:address_id>/delete/", csrf_exempt(user_views.delete_saved_address)),
+    path("users/geocode/", csrf_exempt(user_views.geocode_search)),
     path("users/discover/", csrf_exempt(user_views.discover_users)),
     path("users/referrals/", csrf_exempt(user_views.get_my_referrals)),
 

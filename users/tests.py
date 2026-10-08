@@ -1,5 +1,6 @@
 """Account safety: what a profile reveals, and the signup path."""
 import datetime
+from unittest import mock
 
 from django.test import RequestFactory
 from django.utils import timezone
@@ -8,7 +9,7 @@ from users import views as users_views
 
 from skills.utils import get_or_create_skill
 from social.testing import ApiTestCase, make_user
-from users.models import OTPVerification, PhoneOTPVerification, User
+from users.models import OTPVerification, PhoneOTPVerification, SavedAddress, User
 
 
 class ProfilePrivacyTests(ApiTestCase):
@@ -155,3 +156,147 @@ class SeoProfileListTests(ApiTestCase):
         res = self.get()
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()['count'], len(res.json()['results']))
+
+
+class SavedAddressTests(ApiTestCase):
+    """Switching the feed between saved places (see users.models.SavedAddress)."""
+
+    def setUp(self):
+        self.user = make_user('nomad')
+        self.home = {'label': 'Home', 'latitude': '30.73', 'longitude': '76.77',
+                     'address': 'Sector 34, Chandigarh'}
+
+    def test_saving_and_listing_a_place(self):
+        r = self.post_as(self.user, '/users/addresses/', self.home)
+        self.assertEqual(r.status_code, 201)
+        saved = self.get_as(self.user, '/users/addresses/').json()['addresses']
+        self.assertEqual([a['label'] for a in saved], ['Home'])
+        self.assertEqual(saved[0]['latitude'], 30.73)
+
+    def test_anonymous_callers_get_nothing(self):
+        self.assertEqual(self.client.get('/users/addresses/').status_code, 401)
+
+    def test_a_place_is_private_to_its_owner(self):
+        self.post_as(self.user, '/users/addresses/', self.home)
+        other = self.get_as(make_user('stranger'), '/users/addresses/').json()
+        self.assertEqual(other['addresses'], [])
+
+    def test_impossible_coordinates_are_refused(self):
+        r = self.post_as(self.user, '/users/addresses/',
+                         {**self.home, 'latitude': '999'})
+        self.assertEqual(r.status_code, 400)
+
+    def test_an_unnamed_place_is_refused(self):
+        r = self.post_as(self.user, '/users/addresses/', {**self.home, 'label': '  '})
+        self.assertEqual(r.status_code, 400)
+
+    def test_reusing_a_name_moves_that_place_instead_of_erroring(self):
+        """Moving flats is the common case; unique_together would otherwise
+        surface as a 500."""
+        self.post_as(self.user, '/users/addresses/', self.home)
+        r = self.post_as(self.user, '/users/addresses/',
+                         {**self.home, 'latitude': '28.61', 'longitude': '77.21'})
+        self.assertEqual(r.status_code, 200)
+        saved = self.get_as(self.user, '/users/addresses/').json()['addresses']
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0]['latitude'], 28.61)
+
+    def test_the_cap_holds(self):
+        for i in range(SavedAddress.MAX_PER_USER):
+            self.assertEqual(
+                self.post_as(self.user, '/users/addresses/',
+                             {**self.home, 'label': f'Place {i}'}).status_code, 201)
+        r = self.post_as(self.user, '/users/addresses/', {**self.home, 'label': 'One more'})
+        self.assertEqual(r.status_code, 400)
+
+    def test_removing_a_place(self):
+        made = self.post_as(self.user, '/users/addresses/', self.home).json()['address']
+        r = self.client.delete(f"/users/addresses/{made['id']}/delete/", **self.auth(self.user))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.get_as(self.user, '/users/addresses/').json()['addresses'], [])
+
+    def test_you_cannot_remove_someone_else_s_place(self):
+        made = self.post_as(self.user, '/users/addresses/', self.home).json()['address']
+        r = self.client.delete(f"/users/addresses/{made['id']}/delete/",
+                               **self.auth(make_user('stranger')))
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual(len(self.get_as(self.user, '/users/addresses/').json()['addresses']), 1)
+
+
+class AvailabilityStatusGoneTests(ApiTestCase):
+    """The self-declared "Open to work" flag was removed — see migration
+    users/0016. A stale profile field cannot be trusted, and its default
+    ('not_available') silently told every visitor the person did not want
+    work."""
+
+    def test_the_update_endpoint_is_gone(self):
+        user = make_user('someone')
+        r = self.post_as(user, '/users/status/update/', {'status': 'open_to_work'})
+        self.assertEqual(r.status_code, 404)
+
+    def test_a_profile_no_longer_carries_a_status(self):
+        user = make_user('someone')
+        self.assertNotIn('status', self.get_as(user, f'/users/{user.id}/').json())
+
+    def test_a_proposal_no_longer_depends_on_a_flag(self):
+        """This gate made proposals impossible to send to anyone who had never
+        opened Settings."""
+        sender = make_user('sender', contact=True)
+        receiver = make_user('receiver')
+        r = self.post_as(sender, f'/work/proposals/send/{receiver.id}/',
+                         {'description': 'Shoot on Sunday', 'payment_per_day': '2000'})
+        self.assertEqual(r.status_code, 201)
+
+
+class GeocodeSearchTests(ApiTestCase):
+    """Typed-address lookup, which is what lets someone save a place they are
+    not currently standing in."""
+
+    def setUp(self):
+        self.user = make_user('nomad')
+        from django.core.cache import cache
+        cache.clear()
+
+    def test_it_needs_a_login(self):
+        self.assertEqual(self.client.get('/users/geocode/', {'q': 'chandigarh'}).status_code, 401)
+
+    def test_a_short_query_asks_nobody(self):
+        with mock.patch('users.views.requests.get') as get:
+            r = self.get_as(self.user, '/users/geocode/', {'q': 'ch'})
+        self.assertEqual(r.json()['results'], [])
+        get.assert_not_called()
+
+    def test_results_are_flattened_to_what_a_saved_place_needs(self):
+        payload = [{'lat': '30.7333', 'lon': '76.7794',
+                    'display_name': 'Sector 34, Chandigarh, 160022, India'}]
+        with mock.patch('users.views.requests.get') as get:
+            get.return_value = mock.Mock(status_code=200, json=lambda: payload)
+            results = self.get_as(self.user, '/users/geocode/', {'q': 'sector 34'}).json()['results']
+        self.assertEqual(results, [{
+            'label': 'Sector 34',
+            'address': 'Sector 34, Chandigarh, 160022, India',
+            'latitude': 30.7333,
+            'longitude': 76.7794,
+        }])
+
+    def test_unusable_coordinates_are_dropped_not_served(self):
+        payload = [{'lat': 'north-ish', 'lon': '76.7794', 'display_name': 'Nowhere'}]
+        with mock.patch('users.views.requests.get') as get:
+            get.return_value = mock.Mock(status_code=200, json=lambda: payload)
+            results = self.get_as(self.user, '/users/geocode/', {'q': 'nowhere'}).json()['results']
+        self.assertEqual(results, [])
+
+    def test_a_repeat_query_is_served_from_cache(self):
+        payload = [{'lat': '30.73', 'lon': '76.77', 'display_name': 'Chandigarh, India'}]
+        with mock.patch('users.views.requests.get') as get:
+            get.return_value = mock.Mock(status_code=200, json=lambda: payload)
+            self.get_as(self.user, '/users/geocode/', {'q': 'chandigarh'})
+            self.get_as(self.user, '/users/geocode/', {'q': 'Chandigarh'})
+            self.assertEqual(get.call_count, 1)
+
+    def test_a_dead_third_party_degrades_instead_of_500ing(self):
+        with mock.patch('users.views.requests.get', side_effect=OSError('down')):
+            r = self.get_as(self.user, '/users/geocode/', {'q': 'chandigarh'})
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()['unavailable'])
+        self.assertEqual(r.json()['results'], [])

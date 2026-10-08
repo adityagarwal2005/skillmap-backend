@@ -4,7 +4,10 @@ from django.conf import settings
 from django.contrib.auth.hashers import make_password, check_password
 from django.core.mail import send_mail
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import User, OTPVerification, PhoneOTPVerification, Block, Report, SkillEndorsement, Friendship
+from .models import (
+    User, OTPVerification, PhoneOTPVerification, Block, Report, SkillEndorsement,
+    Friendship, SavedAddress,
+)
 from skills.models import Category, Skill
 import random
 import threading
@@ -12,6 +15,7 @@ import resend
 import os
 import logging
 from social.validators import parse_lat, parse_lon, parse_float
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -307,7 +311,6 @@ def get_friends(request):
             "username": other.username,
             "profile_image": request.build_absolute_uri(other.profile_image.url) if other.profile_image else None,
             "headline": other.headline,
-            "status": other.status,
         })
     return JsonResponse({"friends": data, "count": len(data)})
 
@@ -1120,7 +1123,6 @@ def get_user(request, user_id):
                 "category": user.category.name if user.category else None,
                 "skills": [s['name'] for s in skills],       # back-compat: list of names
                 "skills_detail": skills,                      # names + endorsement counts
-                "status": user.status,
                 "rating": user.rating,
                 "review_count": _safe_review_count(user),
                 "profile_views": user.profile_views,
@@ -1291,27 +1293,6 @@ def delete_user(request, user_id):
     return JsonResponse({"error": "Method not allowed"}, status=405)
 
 
-def update_status(request):
-    if request.method == "POST":
-        user, error = get_user_from_token(request)
-        if error:
-            return error
-
-        status = request.POST.get("status", "").strip()
-        valid = ['open_to_freelance', 'open_to_work', 'not_available']
-
-        if status not in valid:
-            return JsonResponse({
-                "error": f"status must be one of: {', '.join(valid)}"
-            }, status=400)
-
-        user.status = status
-        user.save()
-        return JsonResponse({"message": f"Status updated to '{status}'"})
-
-    return JsonResponse({"error": "Method not allowed"}, status=405)
-
-
 def search_users(request):
     """Find people by username only — no category, no skills, no location.
     Anyone anywhere can be found as long as you know (part of) their username."""
@@ -1364,7 +1345,6 @@ def search_users(request):
             'profile_image': request.build_absolute_uri(u.profile_image.url) if u.profile_image else None,
             'skills':   [s.name for s in u.skills.all()],
             'rating':   u.rating,
-            'status':   u.status,
             'friendship_status': _fstate(u.id),
         } for u in users]
 
@@ -1413,7 +1393,6 @@ def discover_users(request):
         'headline': u.headline,
         'profile_image': request.build_absolute_uri(u.profile_image.url) if u.profile_image else None,
         'skills': [s.name for s in u.skills.all()][:4],
-        'status': u.status,
     } for u in qs[:limit]]
 
     return JsonResponse({'results': results})
@@ -1472,3 +1451,156 @@ def seo_indexable_profiles(request):
         })
 
     return JsonResponse({"count": len(results), "results": results})
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Saved addresses — the places a user can point the feed at.
+# See SavedAddress for why this exists.
+# ──────────────────────────────────────────────────────────────────────────
+
+def _address_json(a):
+    return {
+        'id': a.id,
+        'label': a.label,
+        'address': a.address,
+        'latitude': a.latitude,
+        'longitude': a.longitude,
+    }
+
+
+def saved_addresses(request):
+    """GET  → the caller's saved places.
+       POST → save one (label, latitude, longitude, optional address)."""
+    user, error = get_user_from_token(request)
+    if error:
+        return error
+
+    if request.method == 'GET':
+        return JsonResponse({
+            'addresses': [_address_json(a) for a in user.addresses.all()],
+        })
+
+    if request.method != 'POST':
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    label = (request.POST.get('label') or '').strip()
+    if not label:
+        return JsonResponse({"error": "Give the place a name"}, status=400)
+    if len(label) > 40:
+        label = label[:40]
+
+    lat = parse_lat(request.POST.get('latitude'))
+    lon = parse_lon(request.POST.get('longitude'))
+    if lat is None or lon is None:
+        return JsonResponse({"error": "A valid latitude and longitude are required"}, status=400)
+
+    address = (request.POST.get('address') or '').strip()[:200]
+
+    # Re-saving an existing name moves that place rather than erroring —
+    # "Home" changing because you moved flats is the common case, and the
+    # unique_together would otherwise surface as an IntegrityError.
+    existing = user.addresses.filter(label__iexact=label).first()
+    if existing:
+        existing.label = label
+        existing.address = address
+        existing.latitude = lat
+        existing.longitude = lon
+        existing.save()
+        return JsonResponse({'address': _address_json(existing)})
+
+    if user.addresses.count() >= SavedAddress.MAX_PER_USER:
+        return JsonResponse({
+            "error": f"You can save up to {SavedAddress.MAX_PER_USER} places. Remove one first.",
+        }, status=400)
+
+    a = SavedAddress.objects.create(
+        user=user, label=label, address=address, latitude=lat, longitude=lon,
+    )
+    return JsonResponse({'address': _address_json(a)}, status=201)
+
+
+def delete_saved_address(request, address_id):
+    if request.method not in ('DELETE', 'POST'):
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    user, error = get_user_from_token(request)
+    if error:
+        return error
+
+    deleted, _ = SavedAddress.objects.filter(id=address_id, user=user).delete()
+    if not deleted:
+        return JsonResponse({"error": "Address not found"}, status=404)
+    return JsonResponse({"message": "Removed"})
+
+
+# Nominatim's usage policy asks for a real identifying User-Agent, a low
+# request rate, and no bulk work. Address lookup is typed by hand, one place
+# at a time, and results are cached, so this stays well inside that.
+GEOCODE_URL = 'https://nominatim.openstreetmap.org/search'
+GEOCODE_UA = 'DoitHere/1.0 (https://doithere.in; admin@doithere.in)'
+GEOCODE_CACHE_SECONDS = 60 * 60 * 24
+
+
+def geocode_search(request):
+    """Turn typed text into coordinates, so a place can be saved without
+    standing in it.
+
+    Without this, a saved place could only ever be captured from the device's
+    current fix — which fails the exact case the feature is for: you have just
+    moved to a new city and want to keep an eye on the one you came from.
+    """
+    if request.method != 'GET':
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    _, error = get_user_from_token(request)
+    if error:
+        return error
+
+    q = (request.GET.get('q') or '').strip()
+    if len(q) < 3:
+        return JsonResponse({'results': []})
+
+    from django.core.cache import cache
+    # Hashed because a raw query contains spaces, which are not valid in a
+    # memcached key — harmless on the current backend, a hard error on the next.
+    import hashlib
+    key = 'geocode:' + hashlib.sha256(q.lower().encode()).hexdigest()[:32]
+    cached = cache.get(key)
+    if cached is not None:
+        return JsonResponse({'results': cached})
+
+    try:
+        resp = requests.get(
+            GEOCODE_URL,
+            params={'q': q, 'format': 'jsonv2', 'limit': 5, 'countrycodes': 'in',
+                    'addressdetails': 1},
+            headers={'User-Agent': GEOCODE_UA, 'Accept-Language': 'en'},
+            timeout=6,
+        )
+        raw = resp.json() if resp.status_code == 200 else []
+    except Exception:
+        # The lookup is a convenience — a flaky third party must not turn into
+        # a 500 on a screen whose other paths (current location, already-saved
+        # places) work perfectly well without it.
+        logger.warning("geocode lookup failed", exc_info=True)
+        return JsonResponse({'results': [], 'unavailable': True})
+
+    results = []
+    for item in raw if isinstance(raw, list) else []:
+        lat = parse_lat(item.get('lat'))
+        lon = parse_lon(item.get('lon'))
+        if lat is None or lon is None:
+            continue
+        full = (item.get('display_name') or '').strip()
+        # display_name is long ("Sector 34A, Sector 34, Chandigarh, 160022,
+        # India"); the head is the recognisable bit and the tail is context.
+        head = full.split(',')[0].strip() or q
+        results.append({
+            'label': head[:40],
+            'address': full[:200],
+            'latitude': lat,
+            'longitude': lon,
+        })
+
+    cache.set(key, results, GEOCODE_CACHE_SECONDS)
+    return JsonResponse({'results': results})

@@ -2,6 +2,13 @@ from django.http import JsonResponse
 from .models import Notification
 from users.views import get_user_from_token, friend_state
 
+# Types that no longer belong in the notifications list. Messages used to
+# create one row each, so a short chat buried every notification that needs
+# a decision. New messages now only push and show on the Messages badge —
+# this also hides the rows already sitting in existing accounts, rather than
+# deleting history that the admin may still want to look at.
+HIDDEN_TYPES = ('message',)
+
 
 def get_user_from_request(request):
     return get_user_from_token(request)
@@ -13,7 +20,11 @@ def get_my_notifications(request):
         if error:
             return error
 
-        notifications = Notification.objects.filter(user=user).select_related("actor").order_by("-created_at")
+        notifications = (
+            Notification.objects.filter(user=user)
+            .exclude(notification_type__in=HIDDEN_TYPES)
+            .select_related("actor").order_by("-created_at")
+        )
         data = []
         for n in notifications:
             item = {
@@ -74,7 +85,10 @@ def get_unread_count(request):
         if error:
             return error
 
-        count = Notification.objects.filter(user=user, is_read=False).count()
+        count = (
+            Notification.objects.filter(user=user, is_read=False)
+            .exclude(notification_type__in=HIDDEN_TYPES).count()
+        )
         return JsonResponse({"unread_count": count})
 
     return JsonResponse({"error": "Method not allowed"}, status=405)

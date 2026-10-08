@@ -183,8 +183,12 @@ class ApplicationStatusTests(ApiTestCase):
     """What /my-applications/ tells an applicant about where they stand."""
 
     def status_for(self, user, gig):
+        """The reported status, or None when the application has dropped off."""
         apps = self.get_as(user, '/my-applications/').json()['applications']
-        return next(a['status'] for a in apps if a['kind'] == 'freelance' and a['id'] == gig.id)
+        return next(
+            (a['status'] for a in apps if a['kind'] == 'freelance' and a['id'] == gig.id),
+            None,
+        )
 
     def setUp(self):
         self.poster = make_user('poster', contact=True)
@@ -202,18 +206,36 @@ class ApplicationStatusTests(ApiTestCase):
         apply(gig, cal, rejected=True)
         self.assertEqual(self.status_for(cal, gig), 'declined')
 
-    def test_full_gig_reads_filled_for_those_not_picked(self):
+    def test_a_gig_filled_by_someone_else_drops_off(self):
+        """Nothing can happen to it and nothing on the page can act on it, so
+        it stops being the applicant's problem — the hire still sees theirs."""
         ana, dee = make_user('ana'), make_user('dee')
         gig = make_gig(self.poster, status='assigned', assigned_to=ana)
         apply(gig, ana, hired=True)
         apply(gig, dee)
-        self.assertEqual(self.status_for(dee, gig), 'filled')
+        self.assertIsNone(self.status_for(dee, gig))
+        self.assertEqual(self.status_for(ana, gig), 'accepted')
 
-    def test_expired_without_an_answer_reads_closed(self):
+    def test_an_expired_gig_drops_off(self):
         eve = make_user('eve')
         gig = make_gig(self.poster, expires_at=in_hours(-1))
         apply(gig, eve)
-        self.assertEqual(self.status_for(eve, gig), 'closed')
+        self.assertIsNone(self.status_for(eve, gig))
+
+    def test_a_hire_survives_the_window_closing(self):
+        """Being hired turns a listing into real work, which outlives the
+        window the listing was advertised in — the completion and rating
+        flow both hang off this row."""
+        ivy = make_user('ivy')
+        gig = make_gig(self.poster, expires_at=in_hours(-1), status='assigned', assigned_to=ivy)
+        apply(gig, ivy, hired=True)
+        self.assertEqual(self.status_for(ivy, gig), 'accepted')
+
+    def test_a_rejection_drops_off_once_the_window_closes(self):
+        hal = make_user('hal')
+        gig = make_gig(self.poster, expires_at=in_hours(-1))
+        apply(gig, hal, rejected=True)
+        self.assertIsNone(self.status_for(hal, gig))
 
 
 class InboxTests(ApiTestCase):

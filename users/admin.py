@@ -1,14 +1,14 @@
 from django.contrib import admin
 from .models import (
     User, OTPVerification, Block,
-    SkillEndorsement, PushSubscription, Report,
+    SkillEndorsement, PushSubscription, Report, SavedAddress,
 )
 
 
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
-    list_display = ('id', 'username', 'email', 'category', 'status', 'rating', 'created_at')
-    list_filter = ('status', 'category')
+    list_display = ('id', 'username', 'email', 'category', 'rating', 'created_at')
+    list_filter = ('category',)
     search_fields = ('username', 'email')
     ordering = ('-created_at',)
 
@@ -49,3 +49,10 @@ class BlockAdmin(admin.ModelAdmin):
 admin.site.register(OTPVerification)
 admin.site.register(SkillEndorsement)
 admin.site.register(PushSubscription)
+
+
+@admin.register(SavedAddress)
+class SavedAddressAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'label', 'address', 'created_at')
+    search_fields = ('user__username', 'label', 'address')
+    ordering = ('-created_at',)

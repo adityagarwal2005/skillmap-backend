@@ -641,9 +641,6 @@ def send_work_proposal(request, receiver_id):
         try:
             receiver = User.objects.get(id=receiver_id)
 
-            if receiver.status != 'open_to_work':
-                return JsonResponse({"error": "This user is not open to work"}, status=400)
-
             if user.id == receiver.id:
                 return JsonResponse({"error": "You cannot send a proposal to yourself"}, status=400)
 
@@ -822,10 +819,19 @@ def send_message(request, conversation_id):
                 media=media_url, media_type=media_type if media_url else '',
             )
 
-            from notifications.utils import notify
+            # A push, but deliberately no Notification row. One row per
+            # message turned the notifications list into a transcript —
+            # "x: hi", "x: how are you", "x: ?" — burying the things that
+            # actually need a decision (friend requests, applications,
+            # completions) under chatter nobody acts on from that screen.
+            # Messages already carry their own unread badge, per
+            # conversation, which is where an unread message belongs.
+            from notifications.utils import send_web_push
             preview = text or ('sent a video' if media_type == 'video' else 'sent a photo')
             for other in others:
-                notify(other, 'message', f"{user.username}: {preview[:40]}", actor=user)
+                if other.id == user.id:
+                    continue
+                send_web_push(other, user.username, preview[:60], url='/messages')
 
             return JsonResponse({
                 "message": "Message sent",
@@ -1080,9 +1086,34 @@ def get_my_conversations(request):
 
     return JsonResponse({"error": "Method not allowed"}, status=405)
 
+def _application_still_matters(status, listing_open):
+    """Whether an application belongs on the applicant's own screen.
+
+    Listings on DoitHere are visible only until their window closes, so an
+    application to a listing whose window has passed is a dead end: it can
+    never be answered, and there is nothing on the page to act on. Those
+    used to accumulate forever under "My applications", which turned it into
+    a graveyard of expired posts and rejections instead of a list of live
+    work.
+
+    Kept: anything you were hired for (that became real work, and the
+    completion and rating flow lives here), and anything still in the running.
+    A rejection is kept only while its listing is still open, where it
+    explains why you are no longer waiting on it.
+
+    Rows stay in the database either way — the poster's applicant list and the
+    reviews hanging off a hire both need them. They simply stop being the
+    applicant's problem.
+    """
+    if status == 'accepted':
+        return True
+    return listing_open and status in ('pending', 'declined')
+
+
 def get_my_applications(request):
-    """Everything the logged-in user has applied to — freelance jobs and collab
-    posts — with a simple status so they can track outcomes."""
+    """What the logged-in user has applied to that still means something —
+    freelance jobs and collab posts — with a simple status so they can track
+    outcomes. See LIVE_APPLICATION_STATUSES for what is left out."""
     if request.method != "GET":
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
@@ -1118,6 +1149,8 @@ def get_my_applications(request):
             status = 'closed'
         else:
             status = 'pending'
+        if not _application_still_matters(status, wr.status == 'open' and not expired):
+            continue
         apps.append({
             'kind': 'freelance',
             'id': wr.id,
@@ -1153,6 +1186,9 @@ def get_my_applications(request):
                 status = 'filled'
             elif cp.status == 'closed' or (cp.expires_at and cp.expires_at <= now):
                 status = 'closed'
+        collab_open = cp.status != 'closed' and not (cp.expires_at and cp.expires_at <= now)
+        if not _application_still_matters(status, collab_open):
+            continue
         apps.append({
             'kind': 'collab',
             'id': cp.id,
