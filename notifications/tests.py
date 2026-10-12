@@ -1,4 +1,8 @@
 """What does and does not earn a row in the notifications list."""
+import datetime
+
+from django.utils import timezone
+
 from notifications.models import Notification
 from social.testing import ApiTestCase, make_user
 from users.models import Friendship
@@ -50,3 +54,36 @@ class FriendRequestsStillNotifyTests(ApiTestCase):
         self.post_as(ana, f'/users/{ben.id}/friend/')
         listed = self.get_as(ben, '/notifications/').json()['notifications']
         self.assertEqual([n['type'] for n in listed], ['friend_request'])
+
+
+class StaleActivityIsNotServedTests(ApiTestCase):
+    """Screens about your own activity show what is still live, not an
+    archive. See social/staleness.py."""
+
+    def setUp(self):
+        self.user = make_user('nomad', contact=True)
+
+    def _aged(self, days, **kw):
+        n = Notification.objects.create(user=self.user, notification_type='friend_request',
+                                        message='x', **kw)
+        Notification.objects.filter(pk=n.pk).update(
+            created_at=timezone.now() - datetime.timedelta(days=days))
+        return n
+
+    def test_a_recent_notification_is_served(self):
+        self._aged(3)
+        self.assertEqual(self.get_as(self.user, '/notifications/').json()['count'], 1)
+
+    def test_a_month_old_notification_is_not(self):
+        self._aged(31)
+        self.assertEqual(self.get_as(self.user, '/notifications/').json()['count'], 0)
+
+    def test_the_unread_badge_agrees_with_the_list(self):
+        self._aged(31)
+        self._aged(2)
+        self.assertEqual(
+            self.get_as(self.user, '/notifications/unread/').json()['unread_count'], 1)
+
+    def test_nothing_is_deleted(self):
+        self._aged(99)
+        self.assertEqual(Notification.objects.filter(user=self.user).count(), 1)

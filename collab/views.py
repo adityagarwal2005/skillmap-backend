@@ -237,6 +237,23 @@ def show_my_collab_posts(request):
             "skills_needed", "requests"
         ).order_by("-created_at")
 
+        # Same rule as freelance posts — see social/staleness.py. A collab has
+        # no completion flow, so an accepted member counts as outstanding only
+        # while the post itself is still open.
+        from django.utils import timezone as _tz
+        from social.staleness import post_still_matters
+        _now = _tz.now()
+        posts = [
+            p for p in posts
+            if post_still_matters(
+                is_open=p.status != 'closed',
+                expires_at=p.expires_at,
+                closed_at=p.created_at,
+                has_unfinished_hire=False,
+                now=_now,
+            )
+        ]
+
         data = [
             {
                 "id": p.id,

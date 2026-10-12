@@ -162,6 +162,24 @@ def get_my_work_requests(request, user_id):
             .prefetch_related('required_skills', 'responses')
             .order_by("-created_at")
         )
+
+        # Drop posts that closed a fortnight ago and have nothing outstanding.
+        # See social/staleness.py for why this is a read filter, not a delete.
+        from social.staleness import post_still_matters
+        _now = timezone.now()
+        requests = [
+            wr for wr in requests
+            if post_still_matters(
+                is_open=wr.status == 'open',
+                expires_at=wr.expires_at,
+                closed_at=wr.created_at,
+                has_unfinished_hire=bool(
+                    wr.assigned_to_id
+                    and not (wr.completed_by_poster and wr.completed_by_worker)
+                ),
+                now=_now,
+            )
+        ]
         data = [
             {
                 "id": wr.id,

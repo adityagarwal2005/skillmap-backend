@@ -288,3 +288,47 @@ class InboxTests(ApiTestCase):
         self.assertEqual(self.inbox(self.poster)[0]['unread'], 1)
         self.get_as(self.poster, f'/conversations/{self.chat.id}/messages/')
         self.assertEqual(self.inbox(self.poster)[0]['unread'], 0)
+
+
+class MyPostsDropWhatIsDoneTests(ApiTestCase):
+    """The Post screen is about what is live, not an archive of everything
+    you have ever written. See social/staleness.py."""
+
+    def setUp(self):
+        self.poster = make_user('poster', contact=True)
+
+    def mine(self):
+        r = self.get_as(self.poster, f'/work/requests/user/{self.poster.id}/')
+        return [g['id'] for g in r.json()['work_requests']]
+
+    def test_an_open_post_is_listed(self):
+        gig = make_gig(self.poster, expires_at=in_hours(6))
+        self.assertIn(gig.id, self.mine())
+
+    def test_a_post_that_closed_yesterday_is_still_listed(self):
+        gig = make_gig(self.poster, expires_at=in_hours(-24), status='closed')
+        self.assertIn(gig.id, self.mine())
+
+    def test_a_post_that_closed_a_month_ago_is_not(self):
+        gig = make_gig(self.poster, expires_at=in_hours(-24 * 31), status='closed')
+        self.assertNotIn(gig.id, self.mine())
+
+    def test_an_old_post_with_work_still_unfinished_stays(self):
+        """A hire who never confirmed completion is unfinished business, and
+        the poster needs the row to close it out however old it is."""
+        ana = make_user('ana')
+        gig = make_gig(self.poster, expires_at=in_hours(-24 * 60),
+                       status='assigned', assigned_to=ana)
+        self.assertIn(gig.id, self.mine())
+
+    def test_an_old_finished_post_drops_off(self):
+        ana = make_user('ana')
+        gig = make_gig(self.poster, expires_at=in_hours(-24 * 60),
+                       status='closed', assigned_to=ana,
+                       completed_by_poster=True, completed_by_worker=True)
+        self.assertNotIn(gig.id, self.mine())
+
+    def test_nothing_is_deleted(self):
+        make_gig(self.poster, expires_at=in_hours(-24 * 99), status='closed')
+        from work.models import WorkRequest
+        self.assertEqual(WorkRequest.objects.filter(created_by=self.poster).count(), 1)

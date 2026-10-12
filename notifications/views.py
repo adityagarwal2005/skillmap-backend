@@ -20,9 +20,15 @@ def get_my_notifications(request):
         if error:
             return error
 
+        # Anything older than the cutoff is not going to be acted on, and a
+        # month of "28 days ago" rows buries the two that still need an
+        # answer. Rows stay in the database. See social/staleness.py.
+        from django.utils import timezone
+        from social.staleness import notification_cutoff
         notifications = (
             Notification.objects.filter(user=user)
             .exclude(notification_type__in=HIDDEN_TYPES)
+            .filter(created_at__gte=notification_cutoff(timezone.now()))
             .select_related("actor").order_by("-created_at")
         )
         data = []
@@ -85,9 +91,13 @@ def get_unread_count(request):
         if error:
             return error
 
+        from django.utils import timezone
+        from social.staleness import notification_cutoff
         count = (
             Notification.objects.filter(user=user, is_read=False)
-            .exclude(notification_type__in=HIDDEN_TYPES).count()
+            .exclude(notification_type__in=HIDDEN_TYPES)
+            .filter(created_at__gte=notification_cutoff(timezone.now()))
+            .count()
         )
         return JsonResponse({"unread_count": count})
 
