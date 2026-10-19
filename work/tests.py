@@ -332,3 +332,63 @@ class MyPostsDropWhatIsDoneTests(ApiTestCase):
         make_gig(self.poster, expires_at=in_hours(-24 * 99), status='closed')
         from work.models import WorkRequest
         self.assertEqual(WorkRequest.objects.filter(created_by=self.poster).count(), 1)
+
+
+class HistoryTests(ApiTestCase):
+    """History is the complement of the Post screen: whatever that hides
+    because it can no longer be acted on, this shows as a record."""
+
+    def setUp(self):
+        self.poster = make_user('poster', contact=True)
+
+    def hist(self, user=None):
+        return self.get_as(user or self.poster, '/my-history/').json()['history']
+
+    def test_a_live_post_is_not_history_yet(self):
+        make_gig(self.poster, expires_at=in_hours(6))
+        self.assertEqual(self.hist(), [])
+
+    def test_a_long_closed_post_appears(self):
+        gig = make_gig(self.poster, expires_at=in_hours(-24 * 30), status='closed')
+        rows = self.hist()
+        self.assertEqual([r['id'] for r in rows], [gig.id])
+        self.assertEqual(rows[0]['kind'], 'freelance')
+
+    def test_it_carries_what_the_poster_needs_to_remember(self):
+        gig = make_gig(self.poster, expires_at=in_hours(-24 * 30), status='closed')
+        row = self.hist()[0]
+        for field in ('title', 'description', 'payment_amount', 'closed_at', 'applicants'):
+            self.assertIn(field, row)
+        self.assertEqual(row['payment_amount'], gig.payment_amount)
+
+    def test_it_names_everyone_hired_not_only_the_first(self):
+        """assigned_to holds one person; a gig can take several."""
+        ana, ben = make_user('ana'), make_user('ben')
+        gig = make_gig(self.poster, people_needed=2, expires_at=in_hours(-24 * 30),
+                       status='closed', assigned_to=ana,
+                       completed_by_poster=True, completed_by_worker=True)
+        apply(gig, ana, hired=True)
+        apply(gig, ben, hired=True)
+        self.assertEqual(self.hist()[0]['hired'], ['ana', 'ben'])
+
+    def test_a_post_nobody_took_says_so(self):
+        gig = make_gig(self.poster, expires_at=in_hours(-24 * 30))
+        cal = make_user('cal')
+        apply(gig, cal)
+        row = self.hist()[0]
+        self.assertEqual(row['hired'], [])
+        self.assertEqual(row['applicants'], 1)
+        self.assertFalse(row['completed'])
+
+    def test_unfinished_work_stays_out_of_history(self):
+        """It is still live business on the Post screen, however old."""
+        ana = make_user('ana')
+        make_gig(self.poster, expires_at=in_hours(-24 * 60), status='assigned', assigned_to=ana)
+        self.assertEqual(self.hist(), [])
+
+    def test_history_is_self_only(self):
+        make_gig(self.poster, expires_at=in_hours(-24 * 30), status='closed')
+        self.assertEqual(self.hist(make_user('nosy')), [])
+
+    def test_anonymous_callers_get_nothing(self):
+        self.assertEqual(self.client.get('/my-history/').status_code, 401)

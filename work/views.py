@@ -1222,3 +1222,87 @@ def get_my_applications(request):
 
     apps.sort(key=lambda a: a['applied_at'] or '', reverse=True)
     return JsonResponse({'applications': apps, 'count': len(apps)})
+
+
+def get_my_history(request):
+    """Everything the logged-in user has posted whose window has closed.
+
+    The Post screen deliberately drops these (see social/staleness.py): a
+    listing that can no longer be acted on is noise there. But it is not
+    worthless — it is the record of what you have actually run on DoitHere,
+    and the only place a poster can look back at what a gig paid and who
+    took it. So this endpoint is precisely the complement of that filter:
+    whatever the Post screen hides, History shows.
+
+    Self-only. A poster's record names the people they hired, which is
+    theirs to see and nobody else's.
+    """
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    user, error = get_user_from_request(request)
+    if error:
+        return error
+
+    from collab.models import CollabPost
+    from social.staleness import post_still_matters
+
+    now = timezone.now()
+    items = []
+
+    for wr in (WorkRequest.objects.filter(created_by=user)
+               .select_related('assigned_to')
+               .prefetch_related('responses__user')):
+        finished = wr.completed_by_poster and wr.completed_by_worker
+        if post_still_matters(
+            is_open=wr.status == 'open',
+            expires_at=wr.expires_at,
+            closed_at=wr.created_at,
+            has_unfinished_hire=bool(wr.assigned_to_id and not finished),
+            now=now,
+        ):
+            continue
+        # Everyone actually taken on, not just the first — a gig can hire
+        # several, and `assigned_to` only ever holds one of them.
+        hired = sorted({r.user.username for r in wr.responses.all() if r.hired}
+                       | ({wr.assigned_to.username} if wr.assigned_to else set()))
+        items.append({
+            'kind': 'freelance',
+            'id': wr.id,
+            'title': (wr.description or '').strip()[:90],
+            'description': (wr.description or '').strip(),
+            'payment_amount': wr.payment_amount,
+            'people_needed': wr.people_needed or 1,
+            'closed_at': str(wr.expires_at or wr.created_at),
+            'applicants': wr.responses.count(),
+            'hired': hired,
+            'completed': bool(finished),
+        })
+
+    for cp in (CollabPost.objects.filter(user=user)
+               .prefetch_related('requests__applicant')):
+        if post_still_matters(
+            is_open=cp.status != 'closed',
+            expires_at=cp.expires_at,
+            closed_at=cp.created_at,
+            has_unfinished_hire=False,
+            now=now,
+        ):
+            continue
+        joined = sorted({r.applicant.username for r in cp.requests.all()
+                         if r.status == 'accepted'})
+        items.append({
+            'kind': 'collab',
+            'id': cp.id,
+            'title': cp.title,
+            'description': (cp.description or '').strip(),
+            'collab_type': cp.collab_type,
+            'people_needed': cp.people_needed or 1,
+            'closed_at': str(cp.expires_at or cp.created_at),
+            'applicants': cp.requests.count(),
+            'hired': joined,
+            'completed': bool(joined),
+        })
+
+    items.sort(key=lambda i: i['closed_at'] or '', reverse=True)
+    return JsonResponse({'history': items, 'count': len(items)})
