@@ -29,9 +29,13 @@ class PostingTests(ApiTestCase):
                 'time_limit_hours': '24', 'skills': 'Video editing', **overrides}
         return self.post_as(self.poster, '/work/requests/create/', data)
 
-    def test_visibility_window_is_capped_at_48_hours(self):
+    def test_visibility_window_is_capped_at_five_days(self):
         self.assertEqual(self.create(time_limit_hours='500').status_code, 201)
-        self.assertEqual(WorkRequest.objects.get().time_limit_hours, 48)
+        self.assertEqual(WorkRequest.objects.get().time_limit_hours, 120)
+
+    def test_a_five_day_window_is_allowed(self):
+        self.assertEqual(self.create(time_limit_hours='120').status_code, 201)
+        self.assertEqual(WorkRequest.objects.get().time_limit_hours, 120)
 
     def test_capacity_is_clamped_to_five(self):
         self.create(people_needed='99')
@@ -87,6 +91,14 @@ class HiringTests(ApiTestCase):
         self.assertEqual(r.status_code, 200)
         self.assertTrue(WorkRequestResponse.objects.get(user=self.cal).rejected)
         self.assertTrue(Notification.objects.filter(user=self.cal, notification_type='proposal_declined').exists())
+
+    def test_a_declined_applicant_stops_seeing_the_gig_in_their_feed(self):
+        feed = lambda who: [g['id'] for g in
+                            self.get_as(who, f'/work/requests/available/{who.id}/').json()['work_requests']]
+        self.assertIn(self.gig.id, feed(self.cal))   # visible while they're still in the running
+        self.post_as(self.poster, f'/work/requests/{self.gig.id}/reject/', {'applicant_id': self.cal.id})
+        self.assertNotIn(self.gig.id, feed(self.cal))  # gone once declined
+        self.assertIn(self.gig.id, feed(self.ben))     # but only for them — others still see it
 
     def test_cannot_decline_someone_already_hired(self):
         self.hire(self.ana)

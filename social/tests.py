@@ -20,4 +20,4 @@ class ValidatorTests(SimpleTestCase):
         self.assertEqual(parse_float('900', 50, maximum=100), 100)
 
     def test_visibility_cap(self):
-        self.assertEqual(MAX_VISIBILITY_HOURS, 48)
+        self.assertEqual(MAX_VISIBILITY_HOURS, 120)  # five days

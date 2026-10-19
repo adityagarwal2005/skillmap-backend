@@ -2,7 +2,7 @@
 *.pyc
 *.pyo
 .DS_Store
-.DS_Storebackups/
+backups/
 .env
 .venv/
 __pycache__/

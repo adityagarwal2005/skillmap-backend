@@ -221,6 +221,15 @@ def get_available_work_requests(request, user_id):
     blocked_by = set(Block.objects.filter(blocked=user).values_list('blocker_id', flat=True))
     hidden = blocked | blocked_by
 
+    # A declined applicant never sees that gig again. The decline keeps their
+    # response row (so they also can't re-apply), and reject_work_applicant
+    # promises the gig "drops out of their feed for good" — this is where that
+    # promise is kept. collab/views does the same with its declined_posts set.
+    rejected_posts = set(
+        WorkRequestResponse.objects.filter(user=user, rejected=True)
+        .values_list('work_request_id', flat=True)
+    )
+
     # Newest first — this is a live job board. Expired-but-still-"open" jobs
     # (nothing auto-closes status on expiry) are hidden from browsing, even
     # though respond_to_work_request already blocked applying to them.
@@ -236,6 +245,8 @@ def get_available_work_requests(request, user_id):
         if wr.created_by.id == user.id:
             continue
         if wr.created_by.id in hidden:
+            continue
+        if wr.id in rejected_posts:
             continue
 
         if skill_filter:

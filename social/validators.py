@@ -5,10 +5,16 @@ client sending "abc" (or a scanner probing the API) turned into a 500
 instead of a handled response.
 """
 
-# How long a gig or collab may stay visible. The create form offers
-# 2/6/12/24/48h; this is the ceiling both create views clamp to so the
-# limit holds for anything posting to the API directly.
-MAX_VISIBILITY_HOURS = 48
+# How long a gig or collab may stay visible. The create form offers a ladder
+# from 2 hours up to 5 days; this is the ceiling both create views clamp to so
+# the limit holds for anything posting to the API directly.
+MAX_VISIBILITY_HOURS = 120  # five days
+
+# What a listing gets when the poster names no window at all. Kept well below
+# the ceiling on purpose: the board is for perishable work, so an unspecified
+# window should be short, not the maximum. (Only collab lets you omit it; the
+# gig form always sends one.)
+DEFAULT_VISIBILITY_HOURS = 48
 
 
 def parse_coord(value):
