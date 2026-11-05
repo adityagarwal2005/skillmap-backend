@@ -64,8 +64,11 @@ def create_work_request(request):
         time_limit_hours = request.POST.get("time_limit_hours", "").strip()
         skills = request.POST.get("skills", "").strip()
 
-        if not description or not payment_amount or not time_limit_hours or not skills:
-            return JsonResponse({"error": "description, payment_amount, time_limit_hours and skills are required"}, status=400)
+        # Skills are optional: plenty of real gigs (room cleaning, a parcel run)
+        # need none, and forcing the field only made posters type junk like
+        # "Null" to get past it — which then showed as a tag on the board.
+        if not description or not payment_amount or not time_limit_hours:
+            return JsonResponse({"error": "description, payment_amount and time_limit_hours are required"}, status=400)
 
         from skills.utils import get_or_create_skill
         skill_list = [s.strip() for s in skills.split(",") if s.strip()]
@@ -221,12 +224,12 @@ def get_available_work_requests(request, user_id):
     blocked_by = set(Block.objects.filter(blocked=user).values_list('blocker_id', flat=True))
     hidden = blocked | blocked_by
 
-    # A declined applicant never sees that gig again. The decline keeps their
-    # response row (so they also can't re-apply), and reject_work_applicant
-    # promises the gig "drops out of their feed for good" — this is where that
-    # promise is kept. collab/views does the same with its declined_posts set.
-    rejected_posts = set(
-        WorkRequestResponse.objects.filter(user=user, rejected=True)
+    # Any gig you've already responded to drops off your feed: once you've
+    # applied there's nothing left to do on it from the board, and a decline
+    # is meant to be permanent. The response row remembers both cases (it's
+    # also what blocks re-applying). collab/views does the same.
+    applied_posts = set(
+        WorkRequestResponse.objects.filter(user=user)
         .values_list('work_request_id', flat=True)
     )
 
@@ -246,7 +249,7 @@ def get_available_work_requests(request, user_id):
             continue
         if wr.created_by.id in hidden:
             continue
-        if wr.id in rejected_posts:
+        if wr.id in applied_posts:
             continue
 
         if skill_filter:
@@ -634,6 +637,19 @@ def complete_work_request(request, work_request_id):
                 verified_via_work=wr,
             )
             item.skills.set(skills)
+
+        # Experience points: a public tally of work actually finished here,
+        # awarded to both sides once a job closes. F() so two simultaneous
+        # confirmations can't clobber each other. This block runs once — the
+        # gig is now 'closed' and can't be completed again.
+        from django.db.models import F
+        EXP_PER_JOB = 10
+        hire_ids = [h.id for h in hires]
+        if hire_ids:
+            User.objects.filter(id__in=hire_ids).update(
+                experience_points=F('experience_points') + EXP_PER_JOB)
+            User.objects.filter(id=poster.id).update(
+                experience_points=F('experience_points') + EXP_PER_JOB)
 
         # One notification per pairing, each carrying the person to rate as
         # its actor, so tapping it lands on the profile with the Rate button.

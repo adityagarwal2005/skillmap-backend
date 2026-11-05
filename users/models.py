@@ -25,6 +25,10 @@ class User(models.Model):
     headline = models.CharField(max_length=120, blank=True, default='')
     bio = models.TextField(blank=True, default='')
     profile_views = models.PositiveIntegerField(default=0)
+    # Earned on every job finished end-to-end (both sides confirm). A public,
+    # hard-to-fake signal that someone has actually done work here, shown on
+    # their profile so a stranger can tell they're genuine.
+    experience_points = models.PositiveIntegerField(default=0)
     invited_by = models.ForeignKey(
         'self', on_delete=models.SET_NULL, null=True, blank=True, related_name='referrals'
     )

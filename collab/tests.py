@@ -50,8 +50,11 @@ class CollabCapacityTests(ApiTestCase):
     def test_only_the_host_can_respond(self):
         self.assertIn(self.respond('ben', 'accepted', as_user=self.ana).status_code, (403, 404))
 
-    def test_declined_applicant_stops_seeing_the_post(self):
-        self.assertIn(self.post.id, listed_ids(self.get_as(self.cal, '/collab/').json()))
+    def test_applying_drops_the_post_from_your_feed(self):
+        fresh = make_user('freshc')
+        self.assertIn(self.post.id, listed_ids(self.get_as(fresh, '/collab/').json()))   # not applied — sees it
+        # cal applied in setUp, so it's already off cal's board; a decline keeps it so
+        self.assertNotIn(self.post.id, listed_ids(self.get_as(self.cal, '/collab/').json()))
         self.respond('cal', 'declined')
         self.assertNotIn(self.post.id, listed_ids(self.get_as(self.cal, '/collab/').json()))
 

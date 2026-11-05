@@ -143,9 +143,11 @@ def show_collab_posts(request):
     blocked_by = set(Block.objects.filter(blocked=user).values_list('blocker_id', flat=True))
     hidden = blocked | blocked_by
 
-    # Declined applicants stop seeing the post they were turned down for.
-    declined_posts = set(
-        CollabRequest.objects.filter(applicant=user, status='declined')
+    # Any post you've already applied to drops off your feed — once you've
+    # asked to join there's nothing left to do on it from the board, and a
+    # decline is permanent. The request row remembers both.
+    applied_posts = set(
+        CollabRequest.objects.filter(applicant=user)
         .values_list('collab_post_id', flat=True)
     )
 
@@ -168,7 +170,7 @@ def show_collab_posts(request):
     for post in posts:
         if post.user_id in hidden:
             continue
-        if post.id in declined_posts:
+        if post.id in applied_posts:
             continue
 
         # Hide collabs whose visibility window has elapsed (nothing auto-closes

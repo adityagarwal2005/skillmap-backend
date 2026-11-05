@@ -37,6 +37,11 @@ class PostingTests(ApiTestCase):
         self.assertEqual(self.create(time_limit_hours='120').status_code, 201)
         self.assertEqual(WorkRequest.objects.get().time_limit_hours, 120)
 
+    def test_skills_are_optional(self):
+        r = self.create(skills='')
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(WorkRequest.objects.get().required_skills.count(), 0)
+
     def test_capacity_is_clamped_to_five(self):
         self.create(people_needed='99')
         self.assertEqual(WorkRequest.objects.get().people_needed, 5)
@@ -92,13 +97,17 @@ class HiringTests(ApiTestCase):
         self.assertTrue(WorkRequestResponse.objects.get(user=self.cal).rejected)
         self.assertTrue(Notification.objects.filter(user=self.cal, notification_type='proposal_declined').exists())
 
-    def test_a_declined_applicant_stops_seeing_the_gig_in_their_feed(self):
+    def test_a_gig_you_applied_to_drops_off_your_feed(self):
         feed = lambda who: [g['id'] for g in
                             self.get_as(who, f'/work/requests/available/{who.id}/').json()['work_requests']]
-        self.assertIn(self.gig.id, feed(self.cal))   # visible while they're still in the running
+        fresh = make_user('fresh')
+        self.assertIn(self.gig.id, feed(fresh))        # hasn't applied — it's on their board
+        apply(self.gig, fresh)
+        self.assertNotIn(self.gig.id, feed(fresh))     # applied — it drops off
+        # the applicants from setUp don't see it either, and a decline keeps it gone
+        self.assertNotIn(self.gig.id, feed(self.cal))
         self.post_as(self.poster, f'/work/requests/{self.gig.id}/reject/', {'applicant_id': self.cal.id})
-        self.assertNotIn(self.gig.id, feed(self.cal))  # gone once declined
-        self.assertIn(self.gig.id, feed(self.ben))     # but only for them — others still see it
+        self.assertNotIn(self.gig.id, feed(self.cal))
 
     def test_cannot_decline_someone_already_hired(self):
         self.hire(self.ana)
@@ -134,6 +143,13 @@ class CompletionTests(ApiTestCase):
         self.assertTrue(self.gig.completed_by_worker)
         self.assertEqual(self.gig.status, 'assigned')
         self.assertTrue(Notification.objects.filter(user=self.poster, notification_type='job_review').exists())
+
+    def test_finishing_a_job_awards_experience_to_everyone_involved(self):
+        self.complete(self.ana)     # a hire confirms
+        self.complete(self.poster)  # poster confirms — both sides done, the job closes
+        for u in (self.poster, self.ana, self.ben):
+            u.refresh_from_db()
+            self.assertEqual(u.experience_points, 10)
 
     def test_poster_marking_done_asks_every_hire_to_confirm(self):
         self.complete(self.poster)

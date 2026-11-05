@@ -1126,6 +1126,7 @@ def get_user(request, user_id):
                 "rating": user.rating,
                 "review_count": _safe_review_count(user),
                 "profile_views": user.profile_views,
+                "experience_points": user.experience_points,
                 # Same reasoning as email above: this endpoint answers to
                 # anonymous callers, so exact coordinates would let anyone
                 # walk the ID range and map where every user physically is.
