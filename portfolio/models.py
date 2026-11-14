@@ -89,3 +89,34 @@ class Comment(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.text[:30]}"
+
+class Video(models.Model):
+    """A short video clip a user posts to show their work — the reels-style
+    feed. Kept separate from PortfolioItem (which is structured project proof)
+    so the feed stays a simple, fast stream of clips. The file lives on
+    Cloudinary; we store the secure URL and an optional poster thumbnail."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='videos')
+    url = models.URLField(max_length=500)
+    thumbnail = models.URLField(max_length=500, blank=True, default='')
+    caption = models.CharField(max_length=200, blank=True, default='')
+    views = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['-created_at'], name='video_recent_idx')]
+
+    def __str__(self):
+        return f"{self.user.username} - {self.caption[:30]}"
+
+
+class VideoLike(models.Model):
+    video = models.ForeignKey(Video, on_delete=models.CASCADE, related_name='likes')
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
+
+    class Meta:
+        unique_together = [["video", "user"]]
+
+    def __str__(self):
+        return f"{self.user.username} likes video {self.video_id}"

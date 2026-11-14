@@ -112,6 +112,14 @@ urlpatterns = [
     path("portfolio/<int:item_id>/edit/", csrf_exempt(portfolio_views.edit_portfolio_item)),
     path("portfolio/<int:item_id>/delete/", csrf_exempt(portfolio_views.delete_portfolio_item)),
     path("portfolio/<int:item_id>/comment/", csrf_exempt(portfolio_views.add_comment)),
+
+    # Videos — the reels-style feed + proof-of-work clips
+    path("videos/", csrf_exempt(portfolio_views.get_video_feed)),
+    path("videos/create/", csrf_exempt(portfolio_views.create_video)),
+    path("videos/user/<int:user_id>/", csrf_exempt(portfolio_views.show_user_videos)),
+    path("videos/<int:video_id>/like/", csrf_exempt(portfolio_views.toggle_video_like)),
+    path("videos/<int:video_id>/view/", csrf_exempt(portfolio_views.view_video)),
+    path("videos/<int:video_id>/delete/", csrf_exempt(portfolio_views.delete_video)),
     path("portfolio/<int:item_id>/media/add/", csrf_exempt(portfolio_views.add_media)),
     path("portfolio/comments/<int:comment_id>/edit/", csrf_exempt(portfolio_views.edit_comment)),
     path("portfolio/comments/<int:comment_id>/remove/", csrf_exempt(portfolio_views.remove_comment)),

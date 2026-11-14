@@ -494,3 +494,142 @@ def remove_comment(request, comment_id):
             return JsonResponse({"error": "Comment not found or not yours"}, status=404)
 
     return JsonResponse({"error": "Method not allowed"}, status=405)
+
+# ── Videos: the reels-style feed + proof-of-work clips ──────────────────
+from .models import Video, VideoLike                         # noqa: E402
+from users.views import upload_media_file                    # noqa: E402
+
+
+def _video_json(v, request, liked_ids):
+    """One video for the feed/profile. liked_ids is the set of video ids the
+    caller has liked, fetched once to avoid an N+1."""
+    u = v.user
+    avatar = None
+    if getattr(u, 'profile_image', None):
+        try:
+            avatar = request.build_absolute_uri(u.profile_image.url)
+        except Exception:
+            avatar = None
+    return {
+        'id': v.id,
+        'url': v.url,
+        'thumbnail': v.thumbnail or None,
+        'caption': v.caption,
+        'created_at': str(v.created_at) if v.created_at else None,
+        'views': v.views,
+        'likes': v.likes.count(),
+        'liked': v.id in liked_ids,
+        'user': {
+            'id': u.id,
+            'username': u.username,
+            'avatar': avatar,
+            'category': u.category.name if getattr(u, 'category', None) else None,
+        },
+    }
+
+
+def get_video_feed(request):
+    """Newest videos across everyone — the reels feed. Paginated."""
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    user, error = get_user_from_request(request)
+    if error:
+        return error
+    try:
+        limit = min(max(int(request.GET.get('limit', 12)), 1), 30)
+        offset = max(int(request.GET.get('offset', 0)), 0)
+    except (TypeError, ValueError):
+        limit, offset = 12, 0
+
+    from users.models import Block
+    blocked = set(Block.objects.filter(blocker=user).values_list('blocked_id', flat=True))
+    blocked |= set(Block.objects.filter(blocked=user).values_list('blocker_id', flat=True))
+
+    qs = (Video.objects.select_related('user', 'user__category')
+          .prefetch_related('likes').exclude(user_id__in=blocked))
+    total = qs.count()
+    page = list(qs[offset:offset + limit])
+    liked_ids = set(VideoLike.objects.filter(user=user, video__in=page).values_list('video_id', flat=True))
+    data = [_video_json(v, request, liked_ids) for v in page]
+    return JsonResponse({"videos": data, "count": total, "has_more": offset + limit < total})
+
+
+def create_video(request):
+    """Post a clip. Multipart: `video` file (required) + optional `caption`,
+    `thumbnail` (a poster image). The file goes to Cloudinary."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    user, error = get_user_from_request(request)
+    if error:
+        return error
+
+    media = request.FILES.get('video')
+    if not media:
+        return JsonResponse({"error": "A video file is required"}, status=400)
+    url, media_type = upload_media_file(media, folder='videos')
+    if not url:
+        return JsonResponse({"error": "Could not upload that video — check the size (max 50MB) and format"}, status=400)
+    if media_type != 'video':
+        return JsonResponse({"error": "That file isn't a video"}, status=400)
+
+    thumb = ''
+    poster = request.FILES.get('thumbnail')
+    if poster:
+        thumb, _ = upload_media_file(poster, folder='videos')
+
+    v = Video.objects.create(
+        user=user, url=url, thumbnail=thumb,
+        caption=request.POST.get('caption', '').strip()[:200],
+    )
+    return JsonResponse({"video": _video_json(v, request, set())}, status=201)
+
+
+def show_user_videos(request, user_id):
+    """One person's clips — their proof-of-work shelf on the profile."""
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    user, error = get_user_from_request(request)
+    if error:
+        return error
+    page = list(Video.objects.select_related('user', 'user__category')
+                .prefetch_related('likes').filter(user_id=user_id))
+    liked_ids = set(VideoLike.objects.filter(user=user, video__in=page).values_list('video_id', flat=True))
+    return JsonResponse({"videos": [_video_json(v, request, liked_ids) for v in page],
+                         "count": len(page)})
+
+
+def toggle_video_like(request, video_id):
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    user, error = get_user_from_request(request)
+    if error:
+        return error
+    try:
+        video = Video.objects.get(id=video_id)
+    except Video.DoesNotExist:
+        return JsonResponse({"error": "Video not found"}, status=404)
+    like, created = VideoLike.objects.get_or_create(video=video, user=user)
+    if not created:
+        like.delete()
+    return JsonResponse({"liked": created, "likes": video.likes.count()})
+
+
+def view_video(request, video_id):
+    """Count a view. Fire-and-forget; never errors the player."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    from django.db.models import F
+    Video.objects.filter(id=video_id).update(views=F('views') + 1)
+    return JsonResponse({"ok": True})
+
+
+def delete_video(request, video_id):
+    if request.method not in ("POST", "DELETE"):
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    user, error = get_user_from_request(request)
+    if error:
+        return error
+    deleted, _ = Video.objects.filter(id=video_id, user=user).delete()
+    if not deleted:
+        return JsonResponse({"error": "Video not found or not yours"}, status=404)
+    return JsonResponse({"ok": True})
