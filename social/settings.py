@@ -120,6 +120,14 @@ TIME_ZONE = 'Asia/Kolkata'
 USE_I18N = True
 USE_TZ = True
 
+# Emails allowed to read the founder dashboard (/founder/stats/). Comma-separated
+# in the environment; defaults to the founder's account so it works out of the
+# box. Set FOUNDER_EMAILS to change who can see it (e.g. add a co-founder).
+FOUNDER_EMAILS = [
+    e.strip() for e in os.environ.get('FOUNDER_EMAILS', 'adityakp215@gmail.com').split(',')
+    if e.strip()
+]
+
 # STATIC FILES
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')

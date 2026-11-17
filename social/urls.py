@@ -34,6 +34,7 @@ admin.site.site_title = "DoitHere Admin"
 admin.site.index_title = "Administration"
 
 from users import views as user_views
+from users import stats as user_stats
 from skills import views as skill_views
 from work import views as work_views
 from portfolio import views as portfolio_views
@@ -45,6 +46,8 @@ from collab import views as collab_views
 urlpatterns = [
     path("health/", health_check),
     path("admin/", admin.site.urls),
+    # Founder-only analytics (gated on FOUNDER_EMAILS); powers the private /dashboard.
+    path("founder/stats/", csrf_exempt(user_stats.founder_stats)),
 
     # Auth
     path("users/send-otp/", csrf_exempt(user_views.send_otp)),
